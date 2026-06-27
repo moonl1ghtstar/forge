@@ -103,14 +103,6 @@ static int new_label(CodegenCtx *ctx) {
     return ctx->label_count++;
 }
 
-/* Return the Win64 ABI 32-bit register for the Nth integer argument */
-static const char *arg_reg32(int n) {
-    static const char *regs[] = {"ecx", "edx", "r8d", "r9d"};
-    if (n < 4)
-        return regs[n];
-    return NULL;
-}
-
 /* Return the Win64 ABI 64-bit register for the Nth integer argument */
 static const char *arg_reg64(int n) {
     static const char *regs[] = {"rcx", "rdx", "r8", "r9"};
