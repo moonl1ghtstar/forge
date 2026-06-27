@@ -20,7 +20,6 @@ set "WORKDIR=%DRIVE%\forge-build"
 set "WORKOUT=%WORKDIR%\forge.exe"
 set "TMPDIR=%WORKDIR%\tmp"
 set "TEMP=%TMPDIR%"
-set "TMP=%TMPDIR%"
 
 if not exist "%BIN%" mkdir "%BIN%" || goto fail
 if not exist "%WORKDIR%" mkdir "%WORKDIR%" || goto fail
