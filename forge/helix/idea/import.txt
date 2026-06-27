@@ -1,46 +1,52 @@
-import 불러오기 명령어 문법
+Import Command Syntax
 
-1. 전체 불러오기
+1. Importing All
 
- forge.exe 루트 : import <module>
- 프로젝트 루트 (파일) : import "<file>.hlx"
+forge.exe Root : import <module>
 
-2. 특정 함수만 불러오기
+Project Root (File) : import "<file>.hlx"
 
- forge.exe 루트 : import <module> { <func>, <func> }
- 프로젝트 루트 (파일) : import "<file>.hlx" { <func>, <func> }
- 
-3. 폴더 형식
- forge.exe 루트와 프로젝트 루트에서의 불러오는 폴더 형식이 다름.
+2. Importing Specific Functions Only
 
- forge.exe 루트:
-  <module>/<func>.hlx # 파일 1개당 함수 1개
+forge.exe Root : import <module> { <func>, <func> }
 
- 프로젝트 루트:
-  <file>.hlx # 파일 1개당 함수 여러개
+Project Root (File) : import "<file>.hlx" { <func>, <func> }
 
-4. 공통 파일
- 모든 모듈(forge.exe root)은 config.json 파일을 포함해야 한다. # 없으면 모듈 인식 안됨
+3. Folder Format
 
- config.json 형식:
+The folder format for importing differs between the forge.exe root and the project root.
+
+forge.exe Root:
+
+<module>/<func>.hlx # 1 function per file
+
+Project Root:
+
+<file>.hlx # Multiple functions per file
+
+4. Common Files
+
+All modules (forge.exe root) must include a config.json file. # Module not recognized if missing
+
+config.json format:
 
 {
     "module": {
-        "name": "module_name", # 이름은 폴더 이름으로 따름
-        "version": "version"
+        "name": "name",
+        "version": "ver"
     },
     "build": {
-        "source_dir": "source_dir/" # 함수 파일들 있는 곳 (config.json 기준)
+        "source_dir": "<dir>/"
     },
     "funcs": [
         "func",
-        "func"
+        "func
     ],
     "event": {
-        "enabled": true, # false 면 "supported_event": []
+        "enabled": true,
         "supported_event": [
-            "event",
-            "event"
+            event1,
+            event2
         ]
     }
 }

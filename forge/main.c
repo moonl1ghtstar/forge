@@ -17,6 +17,12 @@
 #include "parser/helix-parser.h"
 #include "sema/helix-sema.h"
 #include "codegen/helix-codegen.h"
+#include "c-frontend.h"
+
+#ifdef _WIN32
+__declspec(dllimport) unsigned long __stdcall GetShortPathNameA(const char *lpszLongPath, char *lpszShortPath, unsigned long cchBuffer);
+__declspec(dllimport) unsigned long __stdcall GetCurrentDirectoryA(unsigned long nBufferLength, char *lpBuffer);
+#endif
 
 // define
 #define MINGW_LIB_DIR "C:/msys64/mingw64/lib"
@@ -25,7 +31,7 @@
 
 /* Print usage information and exit */
 static void usage(const char *progname, int exit_code) {
-    fprintf(stderr, "Usage: %s <source.hlx> [-o <output>] [-asm] [-run]\n", progname);
+    fprintf(stderr, "Usage: %s <source.hlx|source.c> [-o <output>] [-asm] [-run]\n", progname);
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -o <file>  Output filename (default: source.exe or source.asm)\n");
     fprintf(stderr, "  -asm       Stop after assembly output\n");
@@ -36,7 +42,7 @@ static void usage(const char *progname, int exit_code) {
 
 static void cli_error(const char *progname, const char *msg) {
     fprintf(stderr, "Forge error: %s\n", msg);
-    fprintf(stderr, "Try: %s <source.hlx> [-o <output>] [-asm] [-run]\n", progname);
+    fprintf(stderr, "Try: %s <source.hlx|source.c> [-o <output>] [-asm] [-run]\n", progname);
 }
 
 /* Read an entire file into a dynamically allocated string */
@@ -103,7 +109,55 @@ static char *replace_extension(const char *path, const char *new_ext) {
     return copy;
 }
 
-static int compile(const char *source_path, const char *output_path) {
+static char *short_path_dup(const char *path) {
+#ifdef _WIN32
+    char buf[1024];
+    unsigned long n = GetShortPathNameA(path, buf, sizeof(buf));
+    if (n > 0 && n < sizeof(buf))
+        return strdup(buf);
+#endif
+    return strdup(path);
+}
+
+static int copy_file_bytes(const char *src_path, const char *dst_path) {
+    FILE *src = fopen(src_path, "rb");
+    FILE *dst;
+    char buf[8192];
+    size_t n;
+
+    if (!src)
+        return 1;
+
+    dst = fopen(dst_path, "wb");
+    if (!dst) {
+        fclose(src);
+        return 1;
+    }
+
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+        if (fwrite(buf, 1, n, dst) != n) {
+            fclose(src);
+            fclose(dst);
+            return 1;
+        }
+    }
+
+    fclose(src);
+    fclose(dst);
+    return 0;
+}
+
+static int map_work_drive(const char *dir) {
+    const char *const argv[] = {"cmd", "/c", "subst", "X:", dir, NULL};
+    return run_process("cmd", argv);
+}
+
+static void unmap_work_drive(void) {
+    const char *const argv[] = {"cmd", "/c", "subst", "X:", "/d", NULL};
+    run_process("cmd", argv);
+}
+
+static int compile_helix(const char *source_path, const char *output_path) {
     char *source;
     Lexer lexer;
     Parser parse_ctx;
@@ -159,19 +213,39 @@ static int compile(const char *source_path, const char *output_path) {
     return 0;
 }
 
+static int compile_source(const char *source_path, const char *output_path) {
+    const char *dot = strrchr(source_path, '.');
+
+    if (dot && strcmp(dot, ".c") == 0)
+        return compile_c(source_path, output_path);
+    if (dot && strcmp(dot, ".hlx") == 0)
+        return compile_helix(source_path, output_path);
+
+    fprintf(stderr, "Forge error: unsupported source file '%s'\n", source_path);
+    fprintf(stderr, "Expected .hlx or .c\n");
+    return 1;
+}
+
 /* Assemble .asm into .obj */
 static int assemble_object(const char *asm_path, const char *obj_path) {
-    const char *const nasm_argv[] = {"nasm", "-f", "win64", asm_path, "-o", obj_path, NULL};
-    return run_process("nasm", nasm_argv);
+    char *asm_short = short_path_dup(asm_path);
+    char *obj_short = short_path_dup(obj_path);
+    const char *const nasm_argv[] = {"nasm", "-f", "win64", asm_short, "-o", obj_short, NULL};
+    int rc = run_process("nasm", nasm_argv);
+    free(asm_short);
+    free(obj_short);
+    return rc;
 }
 
 /* Link .obj into .exe without gcc. Uses ld + MinGW import libs. */
 static int link_executable(const char *obj_path, const char *out_path) {
+    char *obj_short = short_path_dup(obj_path);
+    char *out_short = short_path_dup(out_path);
     const char *const ld_argv[] = {
         "ld",
-        "-o", out_path,
+        "-o", out_short,
         CRT2_OBJ,
-        obj_path,
+        obj_short,
         "-L", MINGW_LIB_DIR,
         "-L", GCC_LIB_DIR,
         "-lmingw32",
@@ -182,7 +256,10 @@ static int link_executable(const char *obj_path, const char *out_path) {
         "-e", "mainCRTStartup",
         "-subsystem", "console",
         NULL};
-    return run_process("ld", ld_argv);
+    int rc = run_process("ld", ld_argv);
+    free(obj_short);
+    free(out_short);
+    return rc;
 }
 
 int main(int argc, char *argv[]) {
@@ -193,9 +270,11 @@ int main(int argc, char *argv[]) {
     int i;
     char *default_output = NULL;
     char *source_base = NULL;
-    char *asm_path = NULL;
-    char *obj_path = NULL;
+    int work_drive_mapped = 0;
     int result;
+    const char *work_asm_path = "X:\\forge-build.asm";
+    const char *work_obj_path = "X:\\forge-build.o";
+    const char *work_exe_path = "X:\\forge-build.exe";
 
     if (argc < 2) {
         cli_error(argv[0], "no input file provided");
@@ -243,67 +322,69 @@ int main(int argc, char *argv[]) {
     }
 
     if (asm_only) {
-        result = compile(source_path, output_path);
+        result = compile_source(source_path, output_path);
         free(default_output);
         free(source_base);
         return result;
     }
 
-    asm_path = replace_extension(output_path, ".asm");
-    obj_path = replace_extension(output_path, ".o");
-    if (!asm_path || !obj_path) {
-        fprintf(stderr, "Forge error: out of memory\n");
-        free(default_output);
-        free(source_base);
-        free(asm_path);
-        free(obj_path);
-        return 1;
+    {
+        char cwd[1024];
+        if (!GetCurrentDirectoryA(sizeof(cwd), cwd)) {
+            fprintf(stderr, "Forge error: cannot read current directory\n");
+            result = 1;
+            goto cleanup;
+        }
+        if (map_work_drive(cwd) != 0) {
+            fprintf(stderr, "Forge error: failed to map work drive for linker tools\n");
+            result = 1;
+            goto cleanup;
+        }
+        work_drive_mapped = 1;
     }
 
-    result = compile(source_path, asm_path);
+    result = compile_source(source_path, work_asm_path);
     if (result != 0) {
-        free(default_output);
-        free(source_base);
-        free(asm_path);
-        free(obj_path);
-        return 1;
+        goto cleanup;
     }
 
-    result = assemble_object(asm_path, obj_path);
+    result = assemble_object(work_asm_path, work_obj_path);
     if (result != 0) {
         fprintf(stderr, "Forge: nasm assembly failed\n");
-        free(default_output);
-        free(source_base);
-        free(asm_path);
-        free(obj_path);
-        return 1;
+        goto cleanup;
     }
 
-    result = link_executable(obj_path, output_path);
+    result = link_executable(work_obj_path, work_exe_path);
     if (result != 0) {
         fprintf(stderr, "Forge: linking failed\n");
-        free(default_output);
-        free(source_base);
-        free(asm_path);
-        free(obj_path);
-        return 1;
+        goto cleanup;
+    }
+
+    if (copy_file_bytes(work_exe_path, output_path) != 0) {
+        fprintf(stderr, "Forge: failed to write '%s'\n", output_path);
+        result = 1;
+        goto cleanup;
     }
 
     printf("Forge: linked '%s'\n", output_path);
 
     if (do_run) {
-        const char *const run_argv[] = {output_path, NULL};
-        result = run_process(output_path, run_argv);
+        char *run_short = short_path_dup(output_path);
+        const char *const run_argv[] = {run_short, NULL};
+        result = run_process(run_short, run_argv);
+        free(run_short);
     }
 
     /* Cleanup temp files from exe build */
-    remove(asm_path);
-    remove(obj_path);
+cleanup:
+    remove(work_asm_path);
+    remove(work_obj_path);
+    remove(work_exe_path);
+    if (work_drive_mapped)
+        unmap_work_drive();
 
     free(default_output);
     free(source_base);
-    free(asm_path);
-    free(obj_path);
 
     if (do_run && result != 0)
         return 1;

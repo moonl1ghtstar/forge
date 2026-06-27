@@ -1,6 +1,6 @@
 # Forge Compiler
 
-Forge is a compiler for the Helix language. It translates `.hlx` source code into x86-64 Windows assembly and can continue through NASM and `ld` to produce a native `.exe`.
+Forge is a compiler for the Helix language and a small C subset. It translates `.hlx` or `.c` source code into x86-64 Windows assembly and can continue through NASM and `ld` to produce a native `.exe`.
 
 ## What Helix Is
 
@@ -19,6 +19,7 @@ If a file has top-level statements but no explicit `main()` function, Forge wrap
 ## Project Layout
 
 - `src/` - compiler source
+- `c/` - C frontend
 - `docs/` - language grammar and notes
 - `tests/` - sample Helix programs
 - `module/` - built-in and system modules
