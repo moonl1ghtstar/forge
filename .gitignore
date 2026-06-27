@@ -1,0 +1,9 @@
+# Build artifacts
+*.o
+*.exe
+*.asm
+
+forge/bin/
+
+# Except test .hlx source files
+!forge/helix/tests/*.hlx
