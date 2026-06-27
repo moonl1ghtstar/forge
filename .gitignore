@@ -4,6 +4,7 @@
 *.asm
 
 forge/bin/
+tools/cpp/build/
 
 # Except test .hlx source files
 !forge/helix/tests/*.hlx

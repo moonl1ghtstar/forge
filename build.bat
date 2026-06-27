@@ -69,6 +69,13 @@ if errorlevel 1 (
 
 set "RC=0"
 echo Built: %OUT%
+echo.
+echo Quick-start:
+echo   forge samples\hello_helix.hlx              ^(exe build^)
+echo   forge samples\hello_c.c                    ^(exe build^)
+echo   forge samples\hello_helix.hlx -asm         ^(-asm preview^)
+echo   forge samples\hello_helix.hlx -obj         ^(-obj only^)
+echo   samples\demo_cross.bat                     ^(cross-link demo^)
 goto cleanup
 
 :fail

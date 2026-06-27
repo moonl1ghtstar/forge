@@ -1,8 +1,0 @@
-import console
-
-function print() {
-    let a = "Hello";
-    console.print(a);
-}
-
-print();

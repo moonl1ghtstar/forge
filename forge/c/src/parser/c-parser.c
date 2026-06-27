@@ -341,6 +341,16 @@ static ASTNode *parse_function(CParser *p) {
 void c_parser_init(CParser *parser, CLexer *lexer) {
     parser->lexer = lexer;
     parser->had_error = 0;
+    parser->inject_main = 1; /* default: synthesize main() if absent */
+    parser->current.lexeme = NULL;
+    parser->previous.lexeme = NULL;
+    advance(parser);
+}
+
+void c_parser_init_lib(CParser *parser, CLexer *lexer) {
+    parser->lexer = lexer;
+    parser->had_error = 0;
+    parser->inject_main = 0; /* library mode: no implicit main() */
     parser->current.lexeme = NULL;
     parser->previous.lexeme = NULL;
     advance(parser);
@@ -380,11 +390,11 @@ ASTNode *c_parse_program(CParser *p) {
     if (entry_block && entry_block->as.block.count > 0) {
         if (main_func)
             block_prepend_block(main_func->as.function.body, entry_block);
-        else {
+        else if (p->inject_main) {
             block_add_stmt(entry_block, ast_return(ast_number(0, entry_line), entry_line));
             program_add_function(prog, ast_function(strdup("main"), NULL, 0, entry_block, entry_line));
         }
-    } else if (!main_func) {
+    } else if (!main_func && p->inject_main) {
         ASTNode *empty_body = ast_block(1);
         block_add_stmt(empty_body, ast_return(ast_number(0, 1), 1));
         program_add_function(prog, ast_function(strdup("main"), NULL, 0, empty_body, 1));
