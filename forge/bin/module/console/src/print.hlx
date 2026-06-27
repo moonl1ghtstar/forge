@@ -1,3 +1,0 @@
-extern {
-    function print(value) -> int;
-}
