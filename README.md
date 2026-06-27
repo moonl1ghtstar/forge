@@ -50,6 +50,8 @@ gcc -Isrc -Isrc\ast -Isrc\lexer -Isrc\parser -Isrc\sema -Isrc\codegen `
   src\sema\sema.c src\codegen\codegen.c -o forge.exe
 ```
 
+or run build.bat
+
 ## Usage
 
 You need to add the forge.exe path to the system environment variables.
