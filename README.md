@@ -51,22 +51,24 @@ gcc -Isrc -Isrc\ast -Isrc\lexer -Isrc\parser -Isrc\sema -Isrc\codegen `
 
 ## Usage
 
+You need to add the forge.exe path to the system environment variables.
+
 Compile to assembly only:
 
 ```powershell
-forge.exe tests\main.hlx -asm
+forge tests\main.hlx -asm
 ```
 
 Compile and link into an executable:
 
 ```powershell
-forge.exe tests\main.hlx
+forge tests\main.hlx
 ```
 
 Run after build:
 
 ```powershell
-forge.exe tests\main.hlx -run
+forge tests\main.hlx -run
 ```
 
 ## Example
