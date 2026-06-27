@@ -1,0 +1,3 @@
+extern {
+    function clear() -> int;
+}
