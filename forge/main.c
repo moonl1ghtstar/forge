@@ -49,7 +49,7 @@
 #include "parser/helix-parser.h"
 #include "sema/helix-sema.h"
 #include "ir/builder/ir-builder.h"
-#include "ir/ir-opt.h"
+#include "ir/opt/ir-opt.h"
 #include "codegen/helix-codegen.h"
 
 /* C frontend headers */
@@ -63,8 +63,8 @@ __declspec(dllimport) unsigned long __stdcall GetCurrentDirectoryA(unsigned long
 
 /* ---- Toolchain paths ---- */
 #define MINGW_LIB_DIR "C:/msys64/mingw64/lib"
-#define GCC_LIB_DIR   "C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0"
-#define CRT2_OBJ      "C:/msys64/mingw64/lib/crt2.o"
+#define GCC_LIB_DIR "C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0"
+#define CRT2_OBJ "C:/msys64/mingw64/lib/crt2.o"
 
 /* Maximum number of extra .obj files that can be passed via -link */
 #define MAX_LINK_OBJS 64
@@ -216,29 +216,52 @@ static void unmap_work_drive(void) {
 
 static const char *ast_type_name(ASTNodeType type) {
     switch (type) {
-    case AST_PROGRAM:    return "PROGRAM";
-    case AST_FUNCTION:   return "FUNCTION";
-    case AST_BLOCK:      return "BLOCK";
-    case AST_VAR_DECL:   return "VAR_DECL";
-    case AST_ASSIGN:     return "ASSIGN";
-    case AST_IF:         return "IF";
-    case AST_WHILE:      return "WHILE";
-    case AST_RETURN:     return "RETURN";
-    case AST_BINARY:     return "BINARY";
-    case AST_UNARY:      return "UNARY";
-    case AST_NUMBER:     return "NUMBER";
-    case AST_STRING:     return "STRING";
-    case AST_VAR:        return "VAR";
-    case AST_CALL:       return "CALL";
-    case AST_EXTERN_FUNC: return "EXTERN_FUNC";
-    case AST_EXPR_STMT:  return "EXPR_STMT";
-    case AST_FOR:        return "FOR";
-    case AST_DO_WHILE:   return "DO_WHILE";
-    case AST_BREAK:      return "BREAK";
-    case AST_PASS:       return "PASS";
-    case AST_STRUCT_DECL: return "STRUCT_DECL";
-    case AST_STRUCT_INIT: return "STRUCT_INIT";
-    case AST_FIELD_ACCESS: return "FIELD_ACCESS";
+    case AST_PROGRAM:
+        return "PROGRAM";
+    case AST_FUNCTION:
+        return "FUNCTION";
+    case AST_BLOCK:
+        return "BLOCK";
+    case AST_VAR_DECL:
+        return "VAR_DECL";
+    case AST_ASSIGN:
+        return "ASSIGN";
+    case AST_IF:
+        return "IF";
+    case AST_WHILE:
+        return "WHILE";
+    case AST_RETURN:
+        return "RETURN";
+    case AST_BINARY:
+        return "BINARY";
+    case AST_UNARY:
+        return "UNARY";
+    case AST_NUMBER:
+        return "NUMBER";
+    case AST_STRING:
+        return "STRING";
+    case AST_VAR:
+        return "VAR";
+    case AST_CALL:
+        return "CALL";
+    case AST_EXTERN_FUNC:
+        return "EXTERN_FUNC";
+    case AST_EXPR_STMT:
+        return "EXPR_STMT";
+    case AST_FOR:
+        return "FOR";
+    case AST_DO_WHILE:
+        return "DO_WHILE";
+    case AST_BREAK:
+        return "BREAK";
+    case AST_PASS:
+        return "PASS";
+    case AST_STRUCT_DECL:
+        return "STRUCT_DECL";
+    case AST_STRUCT_INIT:
+        return "STRUCT_INIT";
+    case AST_FIELD_ACCESS:
+        return "FIELD_ACCESS";
     }
     return "UNKNOWN";
 }
@@ -713,22 +736,22 @@ static int link_executable(const char **obj_paths, int obj_count, const char *ou
 int main(int argc, char *argv[]) {
     const char *source_path = NULL;
     const char *output_path = NULL;
-    int asm_only  = 0;   /* -asm : output .asm text only */
-    int obj_only  = 0;   /* -obj : output .obj (stop before link) */
-    int do_run    = 0;   /* -run : execute after build */
-    int do_link   = 0;   /* -link: link pre-built .obj files */
+    int asm_only = 0; /* -asm : output .asm text only */
+    int obj_only = 0; /* -obj : output .obj (stop before link) */
+    int do_run = 0;   /* -run : execute after build */
+    int do_link = 0;  /* -link: link pre-built .obj files */
     int dump_tokens = 0;
-    int dump_ast  = 0;
-    int dump_ir   = 0;
+    int dump_ast = 0;
+    int dump_ir = 0;
     int i;
 
     /* Extra .obj files supplied via -link */
     const char *link_objs[MAX_LINK_OBJS];
     int link_obj_count = 0;
 
-    char *default_output   = NULL;
-    int   work_drive_mapped = 0;
-    int   result = 0;
+    char *default_output = NULL;
+    int work_drive_mapped = 0;
+    int result = 0;
 
     /* Temporary work paths on X: (short, no spaces) */
     const char *work_asm_path = "X:\\forge-build.asm";

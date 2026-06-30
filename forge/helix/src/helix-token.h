@@ -8,7 +8,7 @@
 #ifndef FORGE_TOKEN_H
 #define FORGE_TOKEN_H
 
- /* Token type enumeration covering all Helix lexical elements */
+/* Token type enumeration covering all Helix lexical elements */
 typedef enum {
     /* Keywords */
     TOKEN_FUNCTION,
@@ -42,34 +42,34 @@ typedef enum {
     TOKEN_STRING,
 
     /* Delimiters */
-    TOKEN_LBRACE,      /* { */
-    TOKEN_RBRACE,      /* } */
-    TOKEN_LPAREN,      /* ( */
-    TOKEN_RPAREN,      /* ) */
-    TOKEN_SEMICOLON,   /* ; */
-    TOKEN_COMMA,       /* , */
-    TOKEN_DOT,         /* . */
-    TOKEN_COLON,       /* : */
+    TOKEN_LBRACE,    /* { */
+    TOKEN_RBRACE,    /* } */
+    TOKEN_LPAREN,    /* ( */
+    TOKEN_RPAREN,    /* ) */
+    TOKEN_SEMICOLON, /* ; */
+    TOKEN_COMMA,     /* , */
+    TOKEN_DOT,       /* . */
+    TOKEN_COLON,     /* : */
 
     /* Arithmetic operators */
-    TOKEN_PLUS,        /* + */
-    TOKEN_MINUS,       /* - */
-    TOKEN_STAR,        /* * */
-    TOKEN_SLASH,       /* / */
+    TOKEN_PLUS,  /* + */
+    TOKEN_MINUS, /* - */
+    TOKEN_STAR,  /* * */
+    TOKEN_SLASH, /* / */
 
     /* Comparison operators */
-    TOKEN_EQ,          /* == */
-    TOKEN_NEQ,         /* != */
-    TOKEN_LT,          /* < */
-    TOKEN_GT,          /* > */
-    TOKEN_LE,          /* <= */
-    TOKEN_GE,          /* >= */
+    TOKEN_EQ,  /* == */
+    TOKEN_NEQ, /* != */
+    TOKEN_LT,  /* < */
+    TOKEN_GT,  /* > */
+    TOKEN_LE,  /* <= */
+    TOKEN_GE,  /* >= */
 
     /* Assignment */
-    TOKEN_ASSIGN,      /* = */
+    TOKEN_ASSIGN, /* = */
 
     /* Logical operators */
-    TOKEN_NOT,         /* ! */
+    TOKEN_NOT, /* ! */
 
     /* Special tokens */
     TOKEN_EOF,
@@ -79,12 +79,13 @@ typedef enum {
 /* Token structure holding type, lexeme text, line number, and numeric value */
 typedef struct {
     TokenType type;
-    char *lexeme;      /* Dynamically allocated string of the token text */
-    int line;          /* Source line number where this token appears */
-    int value;         /* Numeric value for TOKEN_NUMBER tokens */
+    char *lexeme; /* Dynamically allocated string of the token text */
+    int line;     /* Source line number where this token appears */
+    int value;    /* Numeric value for TOKEN_NUMBER tokens */
 } Token;
 
 /* Convert a token type to a human-readable string for error messages */
 const char *token_type_to_string(TokenType type);
 
-#endif /* FORGE_TOKEN_H */
+#endif
+/* FORGE_TOKEN_H */

@@ -9,7 +9,7 @@
 #include <string.h>
 #include "../../../helix/src/sema/helix-sema.h"
 #include "../../../helix/src/ir/builder/ir-builder.h"
-#include "../../../helix/src/ir/ir-opt.h"
+#include "../../../helix/src/ir/opt/ir-opt.h"
 #include "../../../helix/src/codegen/helix-codegen.h"
 #include "c-frontend.h"
 #include "../parser/c-parser.h"

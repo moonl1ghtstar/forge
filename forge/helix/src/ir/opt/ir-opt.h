@@ -5,7 +5,7 @@
 #ifndef FORGE_IR_OPT_H
 #define FORGE_IR_OPT_H
 
-#include "ir.h"
+#include "../ir/ir.h"
 
 void ir_optimize(IRProgram *program);
 

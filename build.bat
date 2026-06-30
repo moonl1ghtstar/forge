@@ -15,11 +15,13 @@ set "ROOT=%~dp0"
 set "SRC=%ROOT%forge\helix\src"
 set "IRSRC=%SRC%\ir"
 set "CSRC=%ROOT%forge\c\src"
-set "BIN=%ROOT%forge\bin"
+set "BIN=%ROOT%forge\bin\bin"
 set "OUT=%BIN%\forge.exe"
+set "OUT_FG=%BIN%\fg.exe"
+set "OUT_4G=%BIN%\4g.exe"
 set "WORKDIR=%DRIVE%\forge-build"
 set "WORKOUT=%WORKDIR%\forge.exe"
-set "TMPDIR=%WORKDIR%\tmp"
+set "TMPDIR=%WORKDIR%\temp"
 set "TEMP=%TMPDIR%"
 
 if not exist "%BIN%" mkdir "%BIN%" || goto fail
@@ -51,9 +53,9 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     "%SRC%\parser\helix-parser.c" ^
     "%SRC%\ast\helix-ast.c" ^
     "%SRC%\sema\helix-sema.c" ^
-    "%SRC%\ir\ir.c" ^
+    "%SRC%\ir\ir\ir.c" ^
     "%SRC%\ir\builder\ir-builder.c" ^
-    "%SRC%\ir\ir-opt.c" ^
+    "%SRC%\ir\opt\ir-opt.c" ^
     "%SRC%\codegen\helix-codegen.c" ^
     "%CSRC%\lexer\c-lexer.c" ^
     "%CSRC%\parser\c-parser.c" ^
@@ -66,13 +68,19 @@ if errorlevel 1 (
 )
 
 copy /y "%WORKOUT%" "%OUT%" >nul
-if errorlevel 1 (
-    set "RC=1"
-    goto fail
-)
+if errorlevel 1 goto fail
+
+copy /y "%WORKOUT%" "%OUT_FG%" >nul
+if errorlevel 1 goto fail
+
+copy /y "%WORKOUT%" "%OUT_4G%" >nul
+if errorlevel 1 goto fail
 
 set "RC=0"
-echo Built: %OUT%
+echo Built:
+echo   %OUT%
+echo   %OUT_FG%
+echo   %OUT_4G%
 echo.
 goto cleanup
 

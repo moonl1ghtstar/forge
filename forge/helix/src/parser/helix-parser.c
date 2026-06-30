@@ -393,24 +393,24 @@ static char *read_func_file(const char *module_name, const char *source_dir, con
 
     if (source_dir && strlen(source_dir) > 0) {
         if (source_dir[strlen(source_dir) - 1] == '/' || source_dir[strlen(source_dir) - 1] == '\\') {
-            snprintf(rel_path, sizeof(rel_path), "module/%s/%s%s.hlx", module_name, source_dir, func_name);
+            snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s%s.hlx", module_name, source_dir, func_name);
         } else {
-            snprintf(rel_path, sizeof(rel_path), "module/%s/%s/%s.hlx", module_name, source_dir, func_name);
+            snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s/%s.hlx", module_name, source_dir, func_name);
         }
     } else {
-        snprintf(rel_path, sizeof(rel_path), "module/%s/%s.hlx", module_name, func_name);
+        snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s.hlx", module_name, func_name);
     }
     source = read_file(rel_path, is_system);
 
     if (!source) {
         if (source_dir && strlen(source_dir) > 0) {
             if (source_dir[strlen(source_dir) - 1] == '/' || source_dir[strlen(source_dir) - 1] == '\\') {
-                snprintf(rel_path, sizeof(rel_path), "moudule/%s/%s%s.hlx", module_name, source_dir, func_name);
+                snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s%s.hlx", module_name, source_dir, func_name);
             } else {
-                snprintf(rel_path, sizeof(rel_path), "moudule/%s/%s/%s.hlx", module_name, source_dir, func_name);
+                snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s/%s.hlx", module_name, source_dir, func_name);
             }
         } else {
-            snprintf(rel_path, sizeof(rel_path), "moudule/%s/%s.hlx", module_name, func_name);
+            snprintf(rel_path, sizeof(rel_path), "../lib/%s/%s.hlx", module_name, func_name);
         }
         source = read_file(rel_path, is_system);
     }
@@ -462,10 +462,10 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
 
     if (is_system) {
         char config_path[512];
-        snprintf(config_path, sizeof(config_path), "module/%s/config.json", module_name);
+        snprintf(config_path, sizeof(config_path), "../lib/%s/config.json", module_name);
         char *config_content = read_file(config_path, is_system);
         if (!config_content) {
-            snprintf(config_path, sizeof(config_path), "moudule/%s/config.json", module_name);
+            snprintf(config_path, sizeof(config_path), "..lib/%s/config.json", module_name);
             config_content = read_file(config_path, is_system);
         }
         if (!config_content) {

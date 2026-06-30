@@ -6,7 +6,7 @@
 #define FORGE_CODEGEN_H
 
 #include <stdio.h>
-#include "../ir/ir.h"
+#include "../ir/ir/ir.h"
 
 int codegen_emit(IRProgram *program, FILE *out);
 

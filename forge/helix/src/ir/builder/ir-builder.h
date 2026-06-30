@@ -5,7 +5,7 @@
 #ifndef FORGE_IR_BUILDER_H
 #define FORGE_IR_BUILDER_H
 
-#include "../ir.h"
+#include "../ir/ir.h"
 
 IRProgram *ir_build_program(ASTNode *program);
 

@@ -1,3 +1,3 @@
-import "func.hlx"
+import console
 
-print();
+console.print("Pls Say Hello..");
