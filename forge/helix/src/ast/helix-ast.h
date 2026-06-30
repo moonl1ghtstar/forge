@@ -29,6 +29,9 @@ typedef enum {
     AST_VAR,           /* Variable reference */
     AST_CALL,          /* Function call */
     AST_EXTERN_FUNC,   /* Extern function declaration (FFI) */
+    AST_STRUCT_DECL,   /* Struct type declaration */
+    AST_STRUCT_INIT,   /* Struct variable initialization */
+    AST_FIELD_ACCESS,  /* Field access expression */
     AST_EXPR_STMT,     /* Expression statement */
     AST_FOR,
     AST_DO_WHILE,
@@ -155,6 +158,29 @@ struct ASTNode {
             char *return_type;
         } extern_func;
 
+        /* AST_STRUCT_DECL: struct name and field names */
+        struct {
+            char *name;
+            char **fields;
+            int field_count;
+        } struct_decl;
+
+        /* AST_STRUCT_INIT: type name, variable name, and initializers */
+        struct {
+            char *type_name;
+            char *var_name;
+            ASTNode **values;
+            char **field_names; /* NULL for positional init */
+            int value_count;
+            int named; /* 1 if named initializers, 0 if positional */
+        } struct_init;
+
+        /* AST_FIELD_ACCESS: object.field */
+        struct {
+            ASTNode *object;
+            char *field_name;
+        } field_access;
+
         /* AST_EXPR_STMT: expression statement */
         struct {
             ASTNode *expr;
@@ -192,6 +218,9 @@ ASTNode *ast_string(char *value, int line);
 ASTNode *ast_var(char *name, int line);
 ASTNode *ast_call(char *name, ASTNode **args, int arg_count, int line);
 ASTNode *ast_extern_func(char *name, char **param_types, int param_count, char *return_type, int line);
+ASTNode *ast_struct_decl(char *name, char **fields, int field_count, int line);
+ASTNode *ast_struct_init(char *type_name, char *var_name, ASTNode **values, char **field_names, int value_count, int named, int line);
+ASTNode *ast_field_access(ASTNode *object, char *field_name, int line);
 ASTNode *ast_expr_stmt(ASTNode *expr, int line);
 ASTNode *ast_for(ASTNode *init, ASTNode *cond, ASTNode *incr, ASTNode *body, int line);
 ASTNode *ast_do_while(ASTNode *cond, ASTNode *body, int line);

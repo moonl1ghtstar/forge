@@ -1,0 +1,52 @@
+Import Command Syntax
+
+1. Importing All
+
+forge.exe Root : import <module>
+
+Project Root (File) : import "<file>.hlx"
+
+2. Importing Specific Functions Only
+
+forge.exe Root : import <module> { <func>, <func> }
+
+Project Root (File) : import "<file>.hlx" { <func>, <func> }
+
+3. Folder Format
+
+The folder format for importing differs between the forge.exe root and the project root.
+
+forge.exe Root:
+
+<module>/<func>.hlx # 1 function per file
+
+Project Root:
+
+<file>.hlx # Multiple functions per file
+
+4. Common Files
+
+All modules (forge.exe root) must include a config.json file. # Module not recognized if missing
+
+config.json format:
+
+{
+    "module": {
+        "name": "name",
+        "version": "ver"
+    },
+    "build": {
+        "source_dir": "<dir>/"
+    },
+    "funcs": [
+        "func",
+        "func
+    ],
+    "event": {
+        "enabled": true,
+        "supported_event": [
+            event1,
+            event2
+        ]
+    }
+}

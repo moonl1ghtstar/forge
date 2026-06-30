@@ -48,6 +48,8 @@
 #include "lexer/helix-lexer.h"
 #include "parser/helix-parser.h"
 #include "sema/helix-sema.h"
+#include "ir/builder/ir-builder.h"
+#include "ir/ir-opt.h"
 #include "codegen/helix-codegen.h"
 
 /* C frontend headers */
@@ -82,6 +84,7 @@ static void usage(const char *progname, int exit_code) {
     fprintf(stderr, "                            Mix Forge and C objects freely\n");
     fprintf(stderr, "  -dump-tokens  Print lexer tokens and exit\n");
     fprintf(stderr, "  -dump-ast     Print parsed AST and exit\n");
+    fprintf(stderr, "  -dump-ir      Print lowered IR and exit\n");
     fprintf(stderr, "\nPipeline:  source -> forge -> .asm -> nasm -f win64 -> .obj -> ld -> .exe\n");
     fprintf(stderr, "Cross-obj: forge src.hlx -obj && gcc -c lib.c -o lib.obj && "
                     "forge -link src.obj lib.obj -o out.exe\n");
@@ -233,6 +236,9 @@ static const char *ast_type_name(ASTNodeType type) {
     case AST_DO_WHILE:   return "DO_WHILE";
     case AST_BREAK:      return "BREAK";
     case AST_PASS:       return "PASS";
+    case AST_STRUCT_DECL: return "STRUCT_DECL";
+    case AST_STRUCT_INIT: return "STRUCT_INIT";
+    case AST_FIELD_ACCESS: return "FIELD_ACCESS";
     }
     return "UNKNOWN";
 }
@@ -278,6 +284,19 @@ static void dump_ast_node(ASTNode *node, int depth) {
         break;
     case AST_EXTERN_FUNC:
         printf(" name=%s argc=%d", node->as.extern_func.name, node->as.extern_func.param_count);
+        break;
+    case AST_STRUCT_DECL:
+        printf(" name=%s fields=%d", node->as.struct_decl.name, node->as.struct_decl.field_count);
+        break;
+    case AST_STRUCT_INIT:
+        printf(" type=%s var=%s values=%d named=%d",
+               node->as.struct_init.type_name,
+               node->as.struct_init.var_name,
+               node->as.struct_init.value_count,
+               node->as.struct_init.named);
+        break;
+    case AST_FIELD_ACCESS:
+        printf(" field=%s", node->as.field_access.field_name);
         break;
     default:
         break;
@@ -326,6 +345,15 @@ static void dump_ast_node(ASTNode *node, int depth) {
             dump_ast_node(node->as.call.args[i], depth + 1);
         break;
     case AST_EXTERN_FUNC:
+        break;
+    case AST_STRUCT_DECL:
+        break;
+    case AST_STRUCT_INIT:
+        for (i = 0; i < node->as.struct_init.value_count; i++)
+            dump_ast_node(node->as.struct_init.values[i], depth + 1);
+        break;
+    case AST_FIELD_ACCESS:
+        dump_ast_node(node->as.field_access.object, depth + 1);
         break;
     case AST_EXPR_STMT:
         dump_ast_node(node->as.expr_stmt.expr, depth + 1);
@@ -441,12 +469,14 @@ static int parse_helix_program_from_file(const char *source_path, ASTNode **prog
     return 0;
 }
 
-static int compile_helix(const char *source_path, const char *asm_path) {
+static int parse_source_program(const char *source_path, ASTNode **program_out);
+
+static int build_ir_from_source(const char *source_path, IRProgram **ir_out, ASTNode **ast_out) {
     ASTNode *program;
-    FILE *out;
+    IRProgram *ir;
     int result;
 
-    result = parse_helix_program_from_file(source_path, &program);
+    result = parse_source_program(source_path, &program);
     if (result != 0) {
         fprintf(stderr, "Forge error: parsing failed. Fix the errors above, then run again.\n");
         return 1;
@@ -459,17 +489,59 @@ static int compile_helix(const char *source_path, const char *asm_path) {
         return 1;
     }
 
-    out = fopen(asm_path, "w");
-    if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", asm_path);
+    ir = ir_build_program(program);
+    if (!ir) {
+        fprintf(stderr, "Forge error: IR build failed.\n");
         ast_free(program);
         return 1;
     }
 
-    codegen_emit(program, out);
+    if (ast_out)
+        *ast_out = program;
+    else
+        ast_free(program);
+    *ir_out = ir;
+    return 0;
+}
+
+static int compile_helix(const char *source_path, const char *asm_path) {
+    IRProgram *ir;
+    ASTNode *program = NULL;
+    FILE *out;
+    int result;
+
+    result = build_ir_from_source(source_path, &ir, &program);
+    if (result != 0) {
+        return 1;
+    }
+
+    ir_optimize(ir);
+
+    out = fopen(asm_path, "w");
+    if (!out) {
+        fprintf(stderr, "Forge error: cannot open output file '%s'\n", asm_path);
+        ir_program_free(ir);
+        ast_free(program);
+        return 1;
+    }
+
+    codegen_emit(ir, out);
     fclose(out);
 
     printf("Forge: compiled '%s' -> '%s'\n", source_path, asm_path);
+    ir_program_free(ir);
+    ast_free(program);
+    return 0;
+}
+
+static int dump_ir_source(const char *source_path) {
+    IRProgram *ir;
+    ASTNode *program = NULL;
+    int rc = build_ir_from_source(source_path, &ir, &program);
+    if (rc != 0)
+        return rc;
+    ir_dump_program(ir, stdout);
+    ir_program_free(ir);
     ast_free(program);
     return 0;
 }
@@ -647,6 +719,7 @@ int main(int argc, char *argv[]) {
     int do_link   = 0;   /* -link: link pre-built .obj files */
     int dump_tokens = 0;
     int dump_ast  = 0;
+    int dump_ir   = 0;
     int i;
 
     /* Extra .obj files supplied via -link */
@@ -771,6 +844,8 @@ int main(int argc, char *argv[]) {
             dump_tokens = 1;
         } else if (strcmp(argv[i], "-dump-ast") == 0) {
             dump_ast = 1;
+        } else if (strcmp(argv[i], "-dump-ir") == 0) {
+            dump_ir = 1;
         } else {
             fprintf(stderr, "Forge error: unexpected argument '%s'\n", argv[i]);
             fprintf(stderr, "Try: %s --help\n", argv[0]);
@@ -791,6 +866,10 @@ int main(int argc, char *argv[]) {
         cli_error(argv[0], "-dump-tokens and -dump-ast are mutually exclusive");
         return 1;
     }
+    if (dump_ir && (dump_tokens || dump_ast || asm_only || obj_only || do_run)) {
+        cli_error(argv[0], "-dump-ir conflicts with output flags");
+        return 1;
+    }
     if (dump_tokens && (asm_only || obj_only || do_run)) {
         cli_error(argv[0], "-dump-tokens conflicts with other output flags");
         return 1;
@@ -808,6 +887,11 @@ int main(int argc, char *argv[]) {
 
     if (dump_ast) {
         result = dump_ast_source(source_path);
+        goto cleanup;
+    }
+
+    if (dump_ir) {
+        result = dump_ir_source(source_path);
         goto cleanup;
     }
 

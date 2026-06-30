@@ -12,6 +12,7 @@
 typedef enum {
     /* Keywords */
     TOKEN_FUNCTION,
+    TOKEN_STRUCT,
     TOKEN_VAR,
     TOKEN_IF,
     TOKEN_ELSE,

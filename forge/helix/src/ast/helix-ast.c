@@ -104,6 +104,32 @@ void ast_free(ASTNode *node) {
         free(node->as.extern_func.return_type);
         break;
     }
+    case AST_STRUCT_DECL: {
+        int i;
+        free(node->as.struct_decl.name);
+        for (i = 0; i < node->as.struct_decl.field_count; i++)
+            free(node->as.struct_decl.fields[i]);
+        free(node->as.struct_decl.fields);
+        break;
+    }
+    case AST_STRUCT_INIT: {
+        int i;
+        free(node->as.struct_init.type_name);
+        free(node->as.struct_init.var_name);
+        for (i = 0; i < node->as.struct_init.value_count; i++)
+            ast_free(node->as.struct_init.values[i]);
+        free(node->as.struct_init.values);
+        if (node->as.struct_init.field_names) {
+            for (i = 0; i < node->as.struct_init.value_count; i++)
+                free(node->as.struct_init.field_names[i]);
+            free(node->as.struct_init.field_names);
+        }
+        break;
+    }
+    case AST_FIELD_ACCESS:
+        ast_free(node->as.field_access.object);
+        free(node->as.field_access.field_name);
+        break;
     case AST_EXPR_STMT:
         ast_free(node->as.expr_stmt.expr);
         break;
@@ -246,6 +272,32 @@ ASTNode *ast_extern_func(char *name, char **param_types, int param_count, char *
     node->as.extern_func.param_types = param_types;
     node->as.extern_func.param_count = param_count;
     node->as.extern_func.return_type = return_type;
+    return node;
+}
+
+ASTNode *ast_struct_decl(char *name, char **fields, int field_count, int line) {
+    ASTNode *node = ast_new(AST_STRUCT_DECL, line);
+    node->as.struct_decl.name = name;
+    node->as.struct_decl.fields = fields;
+    node->as.struct_decl.field_count = field_count;
+    return node;
+}
+
+ASTNode *ast_struct_init(char *type_name, char *var_name, ASTNode **values, char **field_names, int value_count, int named, int line) {
+    ASTNode *node = ast_new(AST_STRUCT_INIT, line);
+    node->as.struct_init.type_name = type_name;
+    node->as.struct_init.var_name = var_name;
+    node->as.struct_init.values = values;
+    node->as.struct_init.field_names = field_names;
+    node->as.struct_init.value_count = value_count;
+    node->as.struct_init.named = named;
+    return node;
+}
+
+ASTNode *ast_field_access(ASTNode *object, char *field_name, int line) {
+    ASTNode *node = ast_new(AST_FIELD_ACCESS, line);
+    node->as.field_access.object = object;
+    node->as.field_access.field_name = field_name;
     return node;
 }
 

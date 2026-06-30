@@ -8,3 +8,4 @@ tools/cpp/build/
 
 # Except test .hlx source files
 !forge/helix/tests/*.hlx
+!forge/c/tests/*.hlx

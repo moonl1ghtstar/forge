@@ -22,7 +22,7 @@ A small JavaScript-style language built for command-line programs:
 
 ### C subset
 
-A minimal C frontend sharing the same AST/IR and codegen as Helix:
+A minimal C frontend sharing the same AST, IR, and codegen as Helix:
 
 - `int` typed variables and parameters
 - Functions with up to 4 parameters
@@ -41,8 +41,9 @@ forge/
     lexer/                Helix lexer
     parser/               Helix parser
     sema/                 Semantic analysis (shared by C frontend)
+    ir/                   IR builder, optimizer, and data model
     codegen/              x86-64 codegen (Windows x64 ABI, shared by both)
-    ast/                  AST node types (shared IR)
+    ast/                  AST node types
   c/src/
     lexer/                C lexer
     parser/               C parser
@@ -94,11 +95,13 @@ Or manually:
 ```powershell
 gcc -std=c11 -O2 -Wall -Wextra `
   -Iforge\helix\src -Iforge\helix\src\ast -Iforge\helix\src\lexer `
-  -Iforge\helix\src\parser -Iforge\helix\src\sema -Iforge\helix\src\codegen `
+  -Iforge\helix\src\parser -Iforge\helix\src\sema -Iforge\helix\src\ir -Iforge\helix\src\codegen `
   -Iforge\c\src -Iforge\c\src\lexer -Iforge\c\src\parser -Iforge\c\src\frontend `
   forge\main.c forge\helix\src\lexer\helix-lexer.c `
   forge\helix\src\parser\helix-parser.c forge\helix\src\ast\helix-ast.c `
-  forge\helix\src\sema\helix-sema.c forge\helix\src\codegen\helix-codegen.c `
+  forge\helix\src\sema\helix-sema.c forge\helix\src\ir\ir.c `
+  forge\helix\src\ir\builder\ir-builder.c forge\helix\src\ir\ir-opt.c `
+  forge\helix\src\codegen\helix-codegen.c `
   forge\c\src\lexer\c-lexer.c forge\c\src\parser\c-parser.c `
   forge\c\src\frontend\c-frontend.c -o forge\bin\forge.exe
 ```
@@ -183,6 +186,7 @@ forge -link src.obj mylib.obj -o program.exe
 | `-run`            | Build `.exe`, then execute it                        |
 | `-dump-tokens`    | Print lexer tokens and exit                          |
 | `-dump-ast`       | Print parsed AST and exit                            |
+| `-dump-ir`        | Print lowered IR and exit                            |
 | `--help`          | Show usage                                           |
 
 ---
@@ -222,7 +226,8 @@ int main() {
 
 - [x] Helix frontend
 - [x] C frontend (int subset)
-- [x] Shared AST/IR and codegen
+- [x] Shared AST and codegen
+- [x] Shared IR layer between semantic analysis and codegen
 - [x] `-asm` assembly preview
 - [x] `-obj` object file output
 - [x] `-link` multi-object linker
@@ -232,8 +237,7 @@ int main() {
 ### Long-term architecture
 
 - One compiler core, many language frontends
-- One shared IR (currently Helix AST reused for C)
-- Dedicate IR layer (lower both ASTs into a common IR before codegen)
+- One shared IR layer for Helix and C
 - Multiple backends (current: NASM x86-64; future: LLVM IR, direct ELF/COFF emit)
 - Consistent diagnostics across every language
 - Go frontend (separate package-aware loader, no forced Helix model)

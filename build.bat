@@ -13,6 +13,7 @@ if errorlevel 1 (
 
 set "ROOT=%~dp0"
 set "SRC=%ROOT%forge\helix\src"
+set "IRSRC=%SRC%\ir"
 set "CSRC=%ROOT%forge\c\src"
 set "BIN=%ROOT%forge\bin"
 set "OUT=%BIN%\forge.exe"
@@ -39,6 +40,7 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     -I"%SRC%\lexer" ^
     -I"%SRC%\parser" ^
     -I"%SRC%\sema" ^
+    -I"%SRC%\ir" ^
     -I"%SRC%\codegen" ^
     -I"%CSRC%" ^
     -I"%CSRC%\lexer" ^
@@ -49,6 +51,9 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     "%SRC%\parser\helix-parser.c" ^
     "%SRC%\ast\helix-ast.c" ^
     "%SRC%\sema\helix-sema.c" ^
+    "%SRC%\ir\ir.c" ^
+    "%SRC%\ir\builder\ir-builder.c" ^
+    "%SRC%\ir\ir-opt.c" ^
     "%SRC%\codegen\helix-codegen.c" ^
     "%CSRC%\lexer\c-lexer.c" ^
     "%CSRC%\parser\c-parser.c" ^

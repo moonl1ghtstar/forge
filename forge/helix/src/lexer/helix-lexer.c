@@ -111,6 +111,8 @@ static Token error_token(const char *msg, int line) {
 static TokenType check_keyword(const char *word) {
     if (strcmp(word, "function") == 0)
         return TOKEN_FUNCTION;
+    if (strcmp(word, "struct") == 0)
+        return TOKEN_STRUCT;
     if (strcmp(word, "var") == 0)
         return TOKEN_VAR;
     if (strcmp(word, "if") == 0)
@@ -326,6 +328,8 @@ const char *token_type_to_string(TokenType type) {
     switch (type) {
     case TOKEN_FUNCTION:
         return "function";
+    case TOKEN_STRUCT:
+        return "struct";
     case TOKEN_VAR:
         return "var";
     case TOKEN_IF:

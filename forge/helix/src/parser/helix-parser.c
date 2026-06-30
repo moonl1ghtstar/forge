@@ -106,8 +106,35 @@ static int match(Parser *p, TokenType type) {
     return 0;
 }
 
+static int peek_token_type(Parser *p, int steps, TokenType *type_out, char **lexeme_out) {
+    Lexer saved_lexer = *p->lexer;
+    Token tok;
+    int i;
+
+    tok.lexeme = NULL;
+    tok.type = TOKEN_EOF;
+    tok.line = p->current.line;
+    tok.value = 0;
+    for (i = 0; i < steps; i++) {
+        Token next = lexer_next(&saved_lexer);
+        token_free(&tok);
+        tok = next;
+    }
+
+    if (type_out)
+        *type_out = tok.type;
+    if (lexeme_out && tok.lexeme)
+        *lexeme_out = strdup(tok.lexeme);
+    else if (lexeme_out)
+        *lexeme_out = NULL;
+
+    token_free(&tok);
+    return 0;
+}
+
 /* ---- Forward declarations for recursive descent ---- */
 static ASTNode *parse_function(Parser *p);
+static ASTNode *parse_struct_decl(Parser *p);
 static ASTNode *parse_block(Parser *p);
 static ASTNode *parse_statement(Parser *p);
 static ASTNode *parse_var_decl(Parser *p);
@@ -121,6 +148,7 @@ static ASTNode *parse_add_sub(Parser *p);
 static ASTNode *parse_mul_div(Parser *p);
 static ASTNode *parse_unary(Parser *p);
 static ASTNode *parse_primary(Parser *p);
+static ASTNode *parse_postfix(Parser *p, ASTNode *base, int line);
 
 static ASTNode *parse_for_stmt(Parser *p);
 static ASTNode *parse_do_stmt(Parser *p);
@@ -131,6 +159,7 @@ static char *read_file(const char *path, int is_system);
 static void append_program(ASTNode *dst, ASTNode *src);
 static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is_system, char **select_funcs, int select_count);
 static char *dup_qualified_name(const char *module_name, const char *member_name);
+static int peek_token_type(Parser *p, int steps, TokenType *type_out, char **lexeme_out);
 
 /* ---- Public API ---- */
 
@@ -158,6 +187,10 @@ ASTNode *parse_program(Parser *p) {
             parse_import_stmt(p, prog);
         } else if (match(p, TOKEN_EXTERN)) {
             parse_extern_block(p, prog);
+        } else if (check(p, TOKEN_STRUCT)) {
+            ASTNode *decl = parse_struct_decl(p);
+            if (decl)
+                program_add_function(prog, decl);
         } else if (check(p, TOKEN_FUNCTION)) {
             ASTNode *func = parse_function(p);
             if (func)
@@ -728,6 +761,81 @@ static ASTNode *parse_function(Parser *p) {
     return ast_function(fname, params, param_count, body, line);
 }
 
+static ASTNode *parse_struct_decl(Parser *p) {
+    int line = p->current.line;
+    Token name;
+    char **fields = NULL;
+    int field_count = 0;
+    char *struct_name;
+
+    consume(p, TOKEN_STRUCT, "expected 'struct'");
+    name = consume(p, TOKEN_IDENT, "expected struct name");
+    consume(p, TOKEN_LBRACE, "expected '{' after struct name");
+    while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+        consume(p, TOKEN_LET, "expected 'let' in struct body");
+        {
+            Token field = consume(p, TOKEN_IDENT, "expected field name");
+            field_count++;
+            fields = (char **)realloc(fields, sizeof(char *) * field_count);
+            fields[field_count - 1] = strdup(field.lexeme);
+            token_free(&field);
+        }
+        consume(p, TOKEN_SEMICOLON, "expected ';' after struct field");
+    }
+    consume(p, TOKEN_RBRACE, "expected '}' after struct body");
+    struct_name = strdup(name.lexeme);
+    token_free(&name);
+    return ast_struct_decl(struct_name, fields, field_count, line);
+}
+
+static ASTNode *parse_struct_init(Parser *p, Token type_tok, Token name_tok) {
+    int line = p->current.line;
+    ASTNode **values = NULL;
+    char **field_names = NULL;
+    int value_count = 0;
+    int named = 0;
+    char *type_name = strdup(type_tok.lexeme);
+    char *var_name = strdup(name_tok.lexeme);
+
+    consume(p, TOKEN_LBRACE, "expected '{' after struct variable name");
+    if (!check(p, TOKEN_RBRACE)) {
+        TokenType next_type;
+        char *next_lexeme = NULL;
+        peek_token_type(p, 1, &next_type, &next_lexeme);
+        if (check(p, TOKEN_IDENT) && next_type == TOKEN_ASSIGN) {
+            named = 1;
+            while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+                Token field = consume(p, TOKEN_IDENT, "expected field name in struct initializer");
+                consume(p, TOKEN_ASSIGN, "expected '=' after field name");
+                {
+                    ASTNode *value = parse_expr(p);
+                    value_count++;
+                    values = (ASTNode **)realloc(values, sizeof(ASTNode *) * value_count);
+                    field_names = (char **)realloc(field_names, sizeof(char *) * value_count);
+                    values[value_count - 1] = value;
+                    field_names[value_count - 1] = strdup(field.lexeme);
+                    token_free(&field);
+                }
+                if (check(p, TOKEN_SEMICOLON))
+                    advance(p);
+                else
+                    break;
+            }
+        } else {
+            do {
+                ASTNode *value = parse_expr(p);
+                value_count++;
+                values = (ASTNode **)realloc(values, sizeof(ASTNode *) * value_count);
+                values[value_count - 1] = value;
+            } while (match(p, TOKEN_COMMA));
+        }
+    }
+    consume(p, TOKEN_RBRACE, "expected '}' after struct initializer");
+    token_free(&type_tok);
+    token_free(&name_tok);
+    return ast_struct_init(type_name, var_name, values, field_names, value_count, named, line);
+}
+
 /* Parse a block: { statements... } */
 static ASTNode *parse_block(Parser *p) {
     int line = p->current.line;
@@ -744,6 +852,8 @@ static ASTNode *parse_block(Parser *p) {
 
 /* Dispatch to the appropriate statement parser based on the current token */
 static ASTNode *parse_statement(Parser *p) {
+    if (check(p, TOKEN_STRUCT))
+        return parse_struct_decl(p);
     if (check(p, TOKEN_LET) || check(p, TOKEN_CONST) || check(p, TOKEN_GLOBAL))
         return parse_var_decl(p);
     if (check(p, TOKEN_FOR))
@@ -778,6 +888,23 @@ static ASTNode *parse_statement(Parser *p) {
      * We need to peek ahead without consuming.
      */
     if (check(p, TOKEN_IDENT)) {
+        TokenType next_type, third_type;
+        char *next_lex = NULL;
+        peek_token_type(p, 1, &next_type, &next_lex);
+        if (next_type == TOKEN_IDENT) {
+            peek_token_type(p, 2, &third_type, NULL);
+            if (third_type == TOKEN_LBRACE) {
+                Token type_tok = consume(p, TOKEN_IDENT, "expected struct type name");
+                Token name_tok = consume(p, TOKEN_IDENT, "expected variable name");
+                free(next_lex);
+                {
+                    ASTNode *si = parse_struct_init(p, type_tok, name_tok);
+                    match(p, TOKEN_SEMICOLON); /* optional trailing ; after } */
+                    return si;
+                }
+            }
+        }
+        free(next_lex);
         /* Save current lexer position for potential rollback */
         Lexer saved_lexer = *p->lexer;
         Token saved_current = p->current;
@@ -991,36 +1118,27 @@ static ASTNode *parse_primary(Parser *p) {
     if (match(p, TOKEN_IDENT)) {
         char *name = strdup(p->previous.lexeme);
         int line = p->previous.line;
+        return parse_postfix(p, ast_var(name, line), line);
+    }
 
-        if (check(p, TOKEN_DOT)) {
-            Token member_name;
-            char *resolved = NULL;
-            advance(p);
-            member_name = consume(p, TOKEN_IDENT, "expected member name after '.'");
-            if (check(p, TOKEN_LPAREN)) {
-                advance(p); /* consume '(' */
-                ASTNode **args = NULL;
-                int arg_count = 0;
-                if (!check(p, TOKEN_RPAREN)) {
-                    do {
-                        ASTNode *arg = parse_expr(p);
-                        arg_count++;
-                        args = (ASTNode **)realloc(args, sizeof(ASTNode *) * arg_count);
-                        args[arg_count - 1] = arg;
-                    } while (match(p, TOKEN_COMMA));
-                }
-                consume(p, TOKEN_RPAREN, "expected ')' after arguments");
-                resolved = dup_qualified_name(name, member_name.lexeme);
-                token_free(&member_name);
-                free(name);
-                return ast_call(resolved, args, arg_count, line);
-            }
+    parse_error(p, "expected expression");
+    advance(p);                             /* skip the problematic token */
+    return ast_number(0, p->previous.line); /* return a dummy node */
+}
+
+static ASTNode *parse_postfix(Parser *p, ASTNode *base, int line) {
+    ASTNode *expr = base;
+
+    while (check(p, TOKEN_DOT)) {
+        Token member_name;
+        advance(p);
+        member_name = consume(p, TOKEN_IDENT, "expected member name after '.'");
+        if (expr->type == AST_VAR && check(p, TOKEN_LPAREN)) {
+            char *base_name = expr->as.var.name;
+            char *resolved = dup_qualified_name(base_name, member_name.lexeme);
             token_free(&member_name);
-        }
-
-        /* Check if this is a function call: name(args) */
-        if (check(p, TOKEN_LPAREN)) {
-            advance(p); /* consume '(' */
+            ast_free(expr);
+            advance(p);
             ASTNode **args = NULL;
             int arg_count = 0;
             if (!check(p, TOKEN_RPAREN)) {
@@ -1032,25 +1150,48 @@ static ASTNode *parse_primary(Parser *p) {
                 } while (match(p, TOKEN_COMMA));
             }
             consume(p, TOKEN_RPAREN, "expected ')' after arguments");
-            return ast_call(name, args, arg_count, line);
+            return ast_call(resolved, args, arg_count, line);
         }
-
-        /* Postfix ++ */
-        if (check(p, TOKEN_INCREMENT)) {
-            advance(p);
-            ASTNode *var_ref = ast_var(strdup(name), line);
-            ASTNode *one = ast_number(1, line);
-            ASTNode *inc_add = ast_binary(var_ref, BIN_ADD, one, line);
-            char *inc_name = strdup(name);
-            free(name);
-            return ast_assign(inc_name, inc_add, line);
-        }
-        return ast_var(name, line);
+        expr = ast_field_access(expr, strdup(member_name.lexeme), member_name.line);
+        token_free(&member_name);
     }
 
-    parse_error(p, "expected expression");
-    advance(p);                             /* skip the problematic token */
-    return ast_number(0, p->previous.line); /* return a dummy node */
+    if (check(p, TOKEN_LPAREN)) {
+        advance(p); /* consume '(' */
+        if (expr->type == AST_VAR) {
+            char *base_name = expr->as.var.name;
+            expr->as.var.name = NULL;
+            ast_free(expr);
+            ASTNode **args = NULL;
+            int arg_count = 0;
+            if (!check(p, TOKEN_RPAREN)) {
+                do {
+                    ASTNode *arg = parse_expr(p);
+                    arg_count++;
+                    args = (ASTNode **)realloc(args, sizeof(ASTNode *) * arg_count);
+                    args[arg_count - 1] = arg;
+                } while (match(p, TOKEN_COMMA));
+            }
+            consume(p, TOKEN_RPAREN, "expected ')' after arguments");
+            return ast_call(base_name, args, arg_count, line);
+        }
+    }
+
+    if (check(p, TOKEN_INCREMENT)) {
+        advance(p);
+        if (expr->type == AST_VAR) {
+            char *base_name = expr->as.var.name;
+            ASTNode *var_ref = ast_var(strdup(base_name), line);
+            ASTNode *one = ast_number(1, line);
+            ASTNode *inc_add = ast_binary(var_ref, BIN_ADD, one, line);
+            char *inc_name = base_name;
+            expr->as.var.name = NULL;
+            ast_free(expr);
+            return ast_assign(inc_name, inc_add, line);
+        }
+    }
+
+    return expr;
 }
 
 static ASTNode *parse_for_stmt(Parser *p) {

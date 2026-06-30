@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../../helix/src/sema/helix-sema.h"
+#include "../../../helix/src/ir/builder/ir-builder.h"
+#include "../../../helix/src/ir/ir-opt.h"
 #include "../../../helix/src/codegen/helix-codegen.h"
 #include "c-frontend.h"
 #include "../parser/c-parser.h"
@@ -97,6 +99,7 @@ int c_parse_program_from_file_lib(const char *source_path, ASTNode **program_out
 
 int compile_c(const char *source_path, const char *output_path) {
     ASTNode *program;
+    IRProgram *ir;
     FILE *out;
     int result;
 
@@ -113,18 +116,29 @@ int compile_c(const char *source_path, const char *output_path) {
         return 1;
     }
 
-    out = fopen(output_path, "w");
-    if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+    ir = ir_build_program(program);
+    if (!ir) {
+        fprintf(stderr, "Forge error: IR build failed.\n");
         ast_free(program);
         return 1;
     }
 
-    codegen_emit(program, out);
+    ir_optimize(ir);
+
+    out = fopen(output_path, "w");
+    if (!out) {
+        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+        ir_program_free(ir);
+        ast_free(program);
+        return 1;
+    }
+
+    codegen_emit(ir, out);
     fclose(out);
 
     printf("Forge: compiled '%s' -> '%s'\n", source_path, output_path);
 
+    ir_program_free(ir);
     ast_free(program);
     return 0;
 }
@@ -137,6 +151,7 @@ int compile_c(const char *source_path, const char *output_path) {
  */
 int compile_c_lib(const char *source_path, const char *output_path) {
     ASTNode *program;
+    IRProgram *ir;
     FILE *out;
     int result;
 
@@ -153,18 +168,29 @@ int compile_c_lib(const char *source_path, const char *output_path) {
         return 1;
     }
 
-    out = fopen(output_path, "w");
-    if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+    ir = ir_build_program(program);
+    if (!ir) {
+        fprintf(stderr, "Forge error: IR build failed.\n");
         ast_free(program);
         return 1;
     }
 
-    codegen_emit(program, out);
+    ir_optimize(ir);
+
+    out = fopen(output_path, "w");
+    if (!out) {
+        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+        ir_program_free(ir);
+        ast_free(program);
+        return 1;
+    }
+
+    codegen_emit(ir, out);
     fclose(out);
 
     printf("Forge: compiled '%s' -> '%s'\n", source_path, output_path);
 
+    ir_program_free(ir);
     ast_free(program);
     return 0;
 }

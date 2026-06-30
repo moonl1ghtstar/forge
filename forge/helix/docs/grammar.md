@@ -27,7 +27,7 @@ If a `main()` function is explicitly defined, the top-level statements outside f
 
 ### Keywords
 The following words are reserved and cannot be used as identifiers:
-`function`, `global`, `const`, `var`, `let`, `if`, `else`, `switch`, `case`, `for`, `while`, `until`, `do`, `pass`, `break`, `return`, `import`, `extern`, `int`, `str`, `bool`, `float`, `long`.
+`function`, `global`, `const`, `var`, `let`, `struct`, `if`, `else`, `switch`, `case`, `for`, `while`, `until`, `do`, `pass`, `break`, `return`, `import`, `extern`, `int`, `str`, `bool`, `float`, `long`.
 
 ### Identifiers
 Identifiers name variables, functions, and modules. 
@@ -219,7 +219,37 @@ extern {
 
 ---
 
-## 10. Operator Precedence
+## 10. Structs
+
+Structs define simple user types with field-only bodies.
+
+### Declaration
+```hlx
+struct Point {
+    let x;
+    let y;
+}
+```
+
+### Initialization
+```hlx
+Point a { 1, 2 };
+
+Point b {
+    x = 3;
+    y = 4;
+};
+```
+
+### Field Access
+```hlx
+print(a.x);
+print(b.y);
+```
+
+---
+
+## 11. Operator Precedence
 
 | Level | Operators | Description | Associativity |
 | :--- | :--- | :--- | :--- |
@@ -232,12 +262,18 @@ extern {
 
 ---
 
-## 11. Formal Grammar (EBNF)
+## 12. Formal Grammar (EBNF)
 
 Below is the formal EBNF grammar defining the Helix language:
 
 ```ebnf
 program        = { import_stmt | extern_block | function | statement } ;
+
+struct_decl    = "struct" IDENT "{" { "let" IDENT ";" } "}" ;
+
+struct_init    = IDENT IDENT "{" ( expr { "," expr } | named_init { ";" named_init } [ ";" ] ) "}" ;
+
+named_init     = IDENT "=" expr ;
 
 import_stmt    = "import" ( IDENT | STRING ) [ "{" IDENT { "," IDENT } "}" ] ;
 
@@ -255,7 +291,9 @@ params         = IDENT { "," IDENT } ;
 
 block          = "{" { statement } "}" ;
 
-statement      = var_decl
+statement      = struct_decl
+               | struct_init
+               | var_decl
                | assign_stmt
                | if_stmt
                | switch_stmt
