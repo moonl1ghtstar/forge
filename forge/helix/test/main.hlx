@@ -1,7 +1,4 @@
 import console
 
-let a = console.input();
-
-console.print("Hello World");
 console.color(0xFF0000);
-console.print(a);
+console.print("Hello World");

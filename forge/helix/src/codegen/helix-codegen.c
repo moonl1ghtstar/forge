@@ -260,18 +260,60 @@ static void emit_call_builtin(CodegenCtx *ctx, const IRFunction *func, const IRI
     }
 
     if (strcmp(fname, "color") == 0 || strcmp(fname, "console_color") == 0) {
-        if (ins->as.call.arg_count > 0 && ins->as.call.args[0].kind == IR_VALUE_CONST_INT) {
-            int value = ins->as.call.args[0].as.int_value;
-            int r = (value >> 16) & 0xFF;
-            int g = (value >> 8) & 0xFF;
-            int b = value & 0xFF;
-            emit(ctx, "    lea rcx, [rel fmt_color]");
-            emit(ctx, "    mov edx, %d", r);
-            emit(ctx, "    mov r8d, %d", g);
-            emit(ctx, "    mov r9d, %d", b);
-            emit(ctx, "    xor eax, eax");
-            emit(ctx, "    call printf");
-            return;
+        if (ins->as.call.arg_count > 0) {
+            IRValue arg = ins->as.call.args[0];
+            int got_val = 0;
+            int value = 0;
+            if (arg.kind == IR_VALUE_CONST_INT) {
+                value = arg.as.int_value;
+                got_val = 1;
+            } else if (arg.kind == IR_VALUE_TEMP) {
+                int b_idx, i_idx;
+                for (b_idx = 0; b_idx < func->block_count; b_idx++) {
+                    const IRBasicBlock *bb = &func->blocks[b_idx];
+                    for (i_idx = 0; i_idx < bb->instruction_count; i_idx++) {
+                        const IRInstruction *def_ins = &bb->instructions[i_idx];
+                        if (def_ins->op == IR_OP_CONST && 
+                            def_ins->has_result && 
+                            def_ins->result.kind == IR_VALUE_TEMP && 
+                            def_ins->result.as.temp_id == arg.as.temp_id) {
+                            if (def_ins->as.constant.value.kind == IR_VALUE_CONST_INT) {
+                                value = def_ins->as.constant.value.as.int_value;
+                                got_val = 1;
+                                break;
+                            }
+                        }
+                    }
+                    if (got_val) break;
+                }
+            }
+
+            if (got_val) {
+                int r = (value >> 16) & 0xFF;
+                int g = (value >> 8) & 0xFF;
+                int b = value & 0xFF;
+                emit(ctx, "    lea rcx, [rel fmt_color]");
+                emit(ctx, "    mov edx, %d", r);
+                emit(ctx, "    mov r8d, %d", g);
+                emit(ctx, "    mov r9d, %d", b);
+                emit(ctx, "    xor eax, eax");
+                emit(ctx, "    call printf");
+                return;
+            } else {
+                emit_value_to_reg(ctx, func, arg, "rax");
+                emit(ctx, "    mov r9, rax");
+                emit(ctx, "    and r9d, 255");
+                emit(ctx, "    mov r8, rax");
+                emit(ctx, "    shr r8, 8");
+                emit(ctx, "    and r8d, 255");
+                emit(ctx, "    mov rdx, rax");
+                emit(ctx, "    shr rdx, 16");
+                emit(ctx, "    and edx, 255");
+                emit(ctx, "    lea rcx, [rel fmt_color]");
+                emit(ctx, "    xor eax, eax");
+                emit(ctx, "    call printf");
+                return;
+            }
         }
         emit(ctx, "    lea rcx, [rel fmt_clear]");
         emit(ctx, "    xor eax, eax");
@@ -390,6 +432,27 @@ static void emit_function(CodegenCtx *ctx, const IRFunction *func) {
     emit(ctx, "    mov rbp, rsp");
     emit(ctx, "    sub rsp, %d", frame_size);
 
+    if (strcmp(func->name, "main") == 0 && ctx->needs_printf) {
+        emit(ctx, "    ; Enable VT100 ANSI escape codes on Windows");
+        emit(ctx, "    mov rcx, -11");
+        emit(ctx, "    call GetStdHandle");
+        emit(ctx, "    cmp rax, 0");
+        emit(ctx, "    je .Lskip_vt100");
+        emit(ctx, "    cmp rax, -1");
+        emit(ctx, "    je .Lskip_vt100");
+        emit(ctx, "    mov [rsp+40], rax");
+        emit(ctx, "    mov rcx, rax");
+        emit(ctx, "    lea rdx, [rsp+32]");
+        emit(ctx, "    call GetConsoleMode");
+        emit(ctx, "    test eax, eax");
+        emit(ctx, "    jz .Lskip_vt100");
+        emit(ctx, "    mov rcx, [rsp+40]");
+        emit(ctx, "    mov edx, [rsp+32]");
+        emit(ctx, "    or edx, 4");
+        emit(ctx, "    call SetConsoleMode");
+        emit(ctx, ".Lskip_vt100:");
+    }
+
     for (i = 0; i < func->param_count && i < 4; i++) {
         static const char *regs[] = {"rcx", "rdx", "r8", "r9"};
         emit(ctx, "    mov [rbp-%d], %s", local_offset(func, i, 0), regs[i]);
@@ -403,6 +466,16 @@ static void emit_function(CodegenCtx *ctx, const IRFunction *func) {
     }
 
     emit(ctx, ".Lexit%d:", exit_label);
+    if (strcmp(func->name, "main") == 0 && ctx->needs_printf) {
+        emit(ctx, "    ; Reset VT100 colors on exit");
+        emit(ctx, "    push rax");
+        emit(ctx, "    sub rsp, 40");
+        emit(ctx, "    lea rcx, [rel fmt_reset]");
+        emit(ctx, "    xor eax, eax");
+        emit(ctx, "    call printf");
+        emit(ctx, "    add rsp, 40");
+        emit(ctx, "    pop rax");
+    }
     emit(ctx, "    mov rsp, rbp");
     emit(ctx, "    pop rbp");
     emit(ctx, "    ret");
@@ -433,6 +506,7 @@ int codegen_emit(IRProgram *program, FILE *out) {
         fprintf(out, "    fmt_str_out: db \"%%s\", 10, 0\n");
         fprintf(out, "    fmt_clear: db 27, '[2J', 27, '[H', 0\n");
         fprintf(out, "    fmt_color: db 27, '[38;2;%%d;%%d;%%dm', 0\n");
+        fprintf(out, "    fmt_reset: db 27, '[0m', 0\n");
     }
     if (ctx.needs_scanf)
         fprintf(out, "    fmt_str_in:  db \" %%255s\", 0\n");
@@ -458,8 +532,12 @@ int codegen_emit(IRProgram *program, FILE *out) {
     }
 
     fprintf(out, "\nsection .text\n");
-    if (ctx.needs_printf)
+    if (ctx.needs_printf) {
+        fprintf(out, "    extern GetStdHandle\n");
+        fprintf(out, "    extern GetConsoleMode\n");
+        fprintf(out, "    extern SetConsoleMode\n");
         fprintf(out, "    extern printf\n");
+    }
     if (ctx.needs_scanf)
         fprintf(out, "    extern scanf\n");
     for (i = 0; i < program->function_count; i++) {
