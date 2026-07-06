@@ -120,17 +120,22 @@ so the runtime can locate module files relative to the executable.
 
 ```
 source (.hlx or .c)
-  └─► Forge codegen_emit()    (shared codegen, Windows x64 ABI)
-        └─► .asm              (NASM-compatible x86-64 text)
-              └─► nasm -f win64
-                    └─► .obj  (COFF object, Win64 compatible)
-                          └─► ld + MinGW CRT
-                                └─► .exe
+  └─► Lexer                   (tokenize)
+        └─► Parser            (→ AST)
+              └─► Sema        (type check / resolve)
+                    └─► IR Builder   (AST → IR instructions)
+                          └─► IR Optimizer  (constant fold, dead code, etc.)
+                                └─► Codegen (IR → x86-64 NASM text, Windows x64 ABI)
+                                      └─► .asm
+                                            └─► nasm -f win64
+                                                  └─► .obj  (COFF, Win64)
+                                                        └─► ld + MinGW CRT
+                                                              └─► .exe
 ```
 
-Both language frontends produce identical `.asm` output through the same
-`codegen_emit()` entry point, so `.obj` files share the same Windows x64 ABI
-and can be freely linked together.
+Both language frontends share the same IR layer, optimizer, and codegen.
+The IR is a flat list of typed instructions (loads, stores, calls, branches)
+that sits between semantic analysis and assembly emit. `-dump-ir` prints it.
 
 ---
 
