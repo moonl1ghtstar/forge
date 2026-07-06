@@ -78,11 +78,24 @@ if errorlevel 1 goto fail
 copy /y "%WORKOUT%" "%OUT_4G%" >nul
 if errorlevel 1 goto fail
 
+set "MODDIR=%ROOT%module"
+set "LIBDIR=%ROOT%forge\bin\lib"
+
+if not exist "%LIBDIR%" mkdir "%LIBDIR%"
+echo Copying modules to %LIBDIR%...
+xcopy /e /i /y "%MODDIR%" "%LIBDIR%" >nul
+if errorlevel 1 (
+    echo Forge error: failed to copy modules.
+    set "RC=1"
+    goto fail
+)
+
 set "RC=0"
 echo Built:
 echo   %OUT%
 echo   %OUT_FG%
 echo   %OUT_4G%
+echo   %LIBDIR% (modules)
 echo.
 goto cleanup
 
