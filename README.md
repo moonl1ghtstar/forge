@@ -10,7 +10,7 @@ x86-64 Windows assembly and drives NASM and `ld` to produce native `.exe` binari
 
 ### Helix (`.hlx`)
 
-A small, JavaScript-style language built for command-line programs:
+A JavaScript-style syntax language built for command-line programs:
 
 - `function` declarations
 - Top-level statements (auto-wrapped into `main`)
