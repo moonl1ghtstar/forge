@@ -81,6 +81,7 @@ typedef struct {
     TokenType type;
     char *lexeme; /* Dynamically allocated string of the token text */
     int line;     /* Source line number where this token appears */
+    int col;      /* Source column number (1-based) */
     int value;    /* Numeric value for TOKEN_NUMBER tokens */
 } Token;
 

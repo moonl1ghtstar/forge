@@ -43,6 +43,7 @@ typedef struct {
     CTokenType type;
     char *lexeme;
     int line;
+    int col;
     int value;
 } CToken;
 

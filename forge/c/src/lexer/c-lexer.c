@@ -20,8 +20,10 @@ static char peek_next(CLexer *lex) {
 
 static char advance(CLexer *lex) {
     char c = lex->source[lex->pos++];
-    if (c == '\n')
+    if (c == '\n') {
         lex->line++;
+        lex->line_start = lex->pos;
+    }
     return c;
 }
 
@@ -29,6 +31,7 @@ void c_lexer_init(CLexer *lexer, const char *source) {
     lexer->source = source;
     lexer->pos = 0;
     lexer->line = 1;
+    lexer->line_start = 0;
 }
 
 static void skip_ws_and_comments(CLexer *lex) {
@@ -60,29 +63,32 @@ static void skip_ws_and_comments(CLexer *lex) {
     }
 }
 
-static CToken make_token(CTokenType type, int line) {
+static CToken make_token(CTokenType type, int line, int col) {
     CToken t;
     t.type = type;
     t.lexeme = NULL;
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
 
-static CToken make_token_str(CTokenType type, const char *lex, int line) {
+static CToken make_token_str(CTokenType type, const char *lex, int line, int col) {
     CToken t;
     t.type = type;
     t.lexeme = strdup(lex);
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
 
-static CToken error_token(const char *msg, int line) {
+static CToken error_token(const char *msg, int line, int col) {
     CToken t;
     t.type = C_TOK_ERROR;
     t.lexeme = strdup(msg);
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
@@ -112,6 +118,7 @@ static CTokenType keyword_type(const char *word) {
 static CToken read_ident(CLexer *lex) {
     int start = lex->pos;
     int line = lex->line;
+    int col = start - lex->line_start + 1;
     while (isalnum((unsigned char)peek(lex)) || peek(lex) == '_')
         advance(lex);
     {
@@ -125,6 +132,7 @@ static CToken read_ident(CLexer *lex) {
             t.type = type;
             t.lexeme = buf;
             t.line = line;
+            t.col = col;
             t.value = 0;
             return t;
         }
@@ -134,6 +142,7 @@ static CToken read_ident(CLexer *lex) {
 static CToken read_number(CLexer *lex) {
     int start = lex->pos;
     int line = lex->line;
+    int col = start - lex->line_start + 1;
     while (isdigit((unsigned char)peek(lex)))
         advance(lex);
     {
@@ -146,6 +155,7 @@ static CToken read_number(CLexer *lex) {
             t.type = C_TOK_NUMBER;
             t.lexeme = buf;
             t.line = line;
+            t.col = col;
             t.value = (int)strtol(buf, NULL, 10);
             return t;
         }
@@ -155,11 +165,14 @@ static CToken read_number(CLexer *lex) {
 CToken c_lexer_next(CLexer *lex) {
     skip_ws_and_comments(lex);
 
+    int start_pos = lex->pos;
+    int col = start_pos - lex->line_start + 1;
+    int line = lex->line;
+
     if (peek(lex) == '\0')
-        return make_token(C_TOK_EOF, lex->line);
+        return make_token(C_TOK_EOF, line, col);
 
     {
-        int line = lex->line;
         char c = peek(lex);
         if (isalpha((unsigned char)c) || c == '_')
             return read_ident(lex);
@@ -167,47 +180,47 @@ CToken c_lexer_next(CLexer *lex) {
             return read_number(lex);
         advance(lex);
         switch (c) {
-        case '{': return make_token(C_TOK_LBRACE, line);
-        case '}': return make_token(C_TOK_RBRACE, line);
-        case '(': return make_token(C_TOK_LPAREN, line);
-        case ')': return make_token(C_TOK_RPAREN, line);
-        case ';': return make_token(C_TOK_SEMICOLON, line);
-        case ',': return make_token(C_TOK_COMMA, line);
-        case '+': return make_token(C_TOK_PLUS, line);
-        case '-': return make_token(C_TOK_MINUS, line);
-        case '*': return make_token(C_TOK_STAR, line);
-        case '/': return make_token(C_TOK_SLASH, line);
+        case '{': return make_token(C_TOK_LBRACE, line, col);
+        case '}': return make_token(C_TOK_RBRACE, line, col);
+        case '(': return make_token(C_TOK_LPAREN, line, col);
+        case ')': return make_token(C_TOK_RPAREN, line, col);
+        case ';': return make_token(C_TOK_SEMICOLON, line, col);
+        case ',': return make_token(C_TOK_COMMA, line, col);
+        case '+': return make_token(C_TOK_PLUS, line, col);
+        case '-': return make_token(C_TOK_MINUS, line, col);
+        case '*': return make_token(C_TOK_STAR, line, col);
+        case '/': return make_token(C_TOK_SLASH, line, col);
         case '=':
             if (peek(lex) == '=') {
                 advance(lex);
-                return make_token_str(C_TOK_EQ, "==", line);
+                return make_token_str(C_TOK_EQ, "==", line, col);
             }
-            return make_token(C_TOK_ASSIGN, line);
+            return make_token(C_TOK_ASSIGN, line, col);
         case '!':
             if (peek(lex) == '=') {
                 advance(lex);
-                return make_token_str(C_TOK_NEQ, "!=", line);
+                return make_token_str(C_TOK_NEQ, "!=", line, col);
             }
-            return make_token(C_TOK_NOT, line);
+            return make_token(C_TOK_NOT, line, col);
         case '<':
             if (peek(lex) == '=') {
                 advance(lex);
-                return make_token_str(C_TOK_LE, "<=", line);
+                return make_token_str(C_TOK_LE, "<=", line, col);
             }
-            return make_token(C_TOK_LT, line);
+            return make_token(C_TOK_LT, line, col);
         case '>':
             if (peek(lex) == '=') {
                 advance(lex);
-                return make_token_str(C_TOK_GE, ">=", line);
+                return make_token_str(C_TOK_GE, ">=", line, col);
             }
-            return make_token(C_TOK_GT, line);
+            return make_token(C_TOK_GT, line, col);
         default:
             break;
         }
         {
             char msg[64];
             snprintf(msg, sizeof(msg), "unexpected character '%c'", c);
-            return error_token(msg, line);
+            return error_token(msg, line, col);
         }
     }
 }

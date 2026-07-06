@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include "helix-sema.h"
+#include "../errors/forge-errors.h"
 
 /* The current Windows x64 backend only passes up to 4 integer arguments
  * in registers. Reject wider call signatures instead of silently
@@ -67,11 +68,68 @@ typedef struct {
 /* Report a semantic error */
 static void sema_error(SemaCtx *ctx, int line, const char *fmt, ...) {
     va_list args;
-    fprintf(stderr, "Forge semantic error: line %d: ", line);
+    char msg[512];
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    vsnprintf(msg, sizeof(msg), fmt, args);
     va_end(args);
-    fprintf(stderr, "\n");
+
+    // Try to find the symbol name inside single quotes
+    char symbol[128] = "";
+    const char *p1 = strchr(msg, '\'');
+    if (p1) {
+        const char *p2 = strchr(p1 + 1, '\'');
+        if (p2 && (p2 - p1 - 1) < (int)sizeof(symbol)) {
+            memcpy(symbol, p1 + 1, p2 - p1 - 1);
+            symbol[p2 - p1 - 1] = '\0';
+        }
+    }
+
+    // Determine the column
+    int col = 0;
+    const char *source = forge_get_current_file_source();
+    if (source && symbol[0] != '\0') {
+        // Find line start
+        const char *curr = source;
+        int current_line = 1;
+        while (current_line < line && *curr != '\0') {
+            if (*curr == '\n') current_line++;
+            curr++;
+        }
+        if (*curr != '\0') {
+            const char *line_start = curr;
+            while (*curr != '\0' && *curr != '\n' && *curr != '\r') curr++;
+            int line_len = (int)(curr - line_start);
+            // Search for symbol in this line
+            const char *pos = strstr(line_start, symbol);
+            if (pos && (pos - line_start) < line_len) {
+                col = (int)(pos - line_start) + 1;
+            }
+        }
+    }
+    if (col == 0) col = 1;
+
+    // Determine the error code based on message contents
+    const char *err_code = "E301"; // default: undefined variable
+    if (strstr(msg, "undefined variable") || strstr(msg, "undeclared variable")) err_code = "E301";
+    else if (strstr(msg, "is already declared") || strstr(msg, "is already defined")) {
+        if (strstr(msg, "struct")) err_code = "E510";
+        else if (strstr(msg, "function")) err_code = "E304";
+        else err_code = "E301"; // redeclared variable
+    }
+    else if (strstr(msg, "is not a function") || strstr(msg, "undefined function")) err_code = "E302";
+    else if (strstr(msg, "expects") && strstr(msg, "argument")) err_code = "E303";
+    else if (strstr(msg, "outside of function") || strstr(msg, "outside function")) err_code = "E306";
+    else if (strstr(msg, "type mismatch") || (strstr(msg, "expects") && strstr(msg, "got"))) err_code = "E401";
+    else if (strstr(msg, "cannot assign") || strstr(msg, "assignment to struct") || strstr(msg, "cannot be assigned")) err_code = "E402";
+    else if (strstr(msg, "not supported in") || strstr(msg, "cannot print")) err_code = "E403";
+    else if (strstr(msg, "unknown struct type")) err_code = "E501";
+    else if (strstr(msg, "duplicate field")) err_code = "E502";
+    else if (strstr(msg, "has no field")) err_code = "E503";
+    else if (strstr(msg, "initialized more than once")) err_code = "E505";
+    else if (strstr(msg, "field value(s)")) err_code = "E506";
+    else if (strstr(msg, "member access")) err_code = "E508";
+
+    forge_report_error(SEV_ERROR, err_code, line, col, NULL, NULL, "%s", msg);
     ctx->had_error = 1;
 }
 

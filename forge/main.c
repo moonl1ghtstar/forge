@@ -44,6 +44,8 @@
 #include <string.h>
 #include <process.h>
 
+#include "errors/forge-errors.h"
+
 /* Helix frontend headers */
 #include "lexer/helix-lexer.h"
 #include "parser/helix-parser.h"
@@ -477,6 +479,7 @@ static int parse_helix_program_from_file(const char *source_path, ASTNode **prog
     if (!source)
         return 1;
 
+    forge_set_current_file(source_path, source);
     lexer_init(&lexer, source);
     parser_init(&parse_ctx, &lexer);
     program = parse_program(&parse_ctx);
@@ -551,7 +554,7 @@ static int compile_helix(const char *source_path, const char *asm_path) {
     codegen_emit(ir, out);
     fclose(out);
 
-    printf("Forge: compiled '%s' -> '%s'\n", source_path, asm_path);
+
     ir_program_free(ir);
     ast_free(program);
     return 0;
@@ -841,7 +844,7 @@ int main(int argc, char *argv[]) {
             result = 1;
             goto cleanup;
         }
-        printf("Forge: linked %d object(s) -> '%s'\n", link_obj_count, output_path);
+
 
         if (do_run) {
             char *run_short = short_path_dup(output_path);
@@ -963,7 +966,7 @@ int main(int argc, char *argv[]) {
             result = 1;
             goto cleanup;
         }
-        printf("Forge: assembled '%s' -> '%s'\n", source_path, output_path);
+
         goto cleanup;
     }
 
@@ -1009,7 +1012,7 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    printf("Forge: linked '%s'\n", output_path);
+
 
     if (do_run) {
         char *run_short = short_path_dup(output_path);
@@ -1019,6 +1022,7 @@ int main(int argc, char *argv[]) {
     }
 
 cleanup:
+    forge_free_errors();
     remove(work_asm_path);
     remove(work_obj_path);
     remove(work_exe_path);

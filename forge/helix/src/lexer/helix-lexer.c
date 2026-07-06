@@ -20,6 +20,7 @@ void lexer_init(Lexer *lexer, const char *source) {
     lexer->source = source;
     lexer->pos = 0;
     lexer->line = 1;
+    lexer->line_start = 0;
 }
 
 /* Peek at the current character without advancing */
@@ -37,8 +38,10 @@ static char peek_next(Lexer *lex) {
 /* Advance the position and return the consumed character */
 static char advance(Lexer *lex) {
     char c = lex->source[lex->pos++];
-    if (c == '\n')
+    if (c == '\n') {
         lex->line++;
+        lex->line_start = lex->pos;
+    }
     return c;
 }
 
@@ -78,31 +81,34 @@ static void skip_whitespace_and_comments(Lexer *lex) {
 }
 
 /* Create a token with the given type and a single-character lexeme */
-static Token make_token(TokenType type, int line) {
+static Token make_token(TokenType type, int line, int col) {
     Token t;
     t.type = type;
     t.lexeme = NULL;
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
 
 /* Create a token with a dynamically allocated lexeme string */
-static Token make_token_str(TokenType type, const char *lex, int line) {
+static Token make_token_str(TokenType type, const char *lex, int line, int col) {
     Token t;
     t.type = type;
     t.lexeme = strdup(lex);
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
 
 /* Create an error token with a message */
-static Token error_token(const char *msg, int line) {
+static Token error_token(const char *msg, int line, int col) {
     Token t;
     t.type = TOKEN_ERROR;
     t.lexeme = strdup(msg);
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
@@ -160,6 +166,7 @@ static TokenType check_keyword(const char *word) {
 static Token read_number(Lexer *lex) {
     int start = lex->pos;
     int line = lex->line;
+    int col = start - lex->line_start + 1;
     int base = 10;
     if (peek(lex) == '0' && (peek_next(lex) == 'x' || peek_next(lex) == 'X')) {
         advance(lex);
@@ -180,6 +187,7 @@ static Token read_number(Lexer *lex) {
     t.type = TOKEN_NUMBER;
     t.lexeme = buf;
     t.line = line;
+    t.col = col;
     t.value = (int)strtol(buf, NULL, base);
     return t;
 }
@@ -188,6 +196,7 @@ static Token read_number(Lexer *lex) {
 static Token read_ident(Lexer *lex) {
     int start = lex->pos;
     int line = lex->line;
+    int col = start - lex->line_start + 1;
     while (isalnum((unsigned char)peek(lex)) || peek(lex) == '_')
         advance(lex);
     int len = lex->pos - start;
@@ -199,13 +208,16 @@ static Token read_ident(Lexer *lex) {
     t.type = type;
     t.lexeme = buf;
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
 
-/* Read a string literal enclosed in double quotes */
+/* Read an string literal enclosed in double quotes */
 static Token read_string(Lexer *lex) {
     int line = lex->line;
+    int start_pos = lex->pos;
+    int col = start_pos - lex->line_start + 1;
     advance(lex); /* consume opening quote */
     int start = lex->pos;
     while (peek(lex) != '\0' && peek(lex) != '"') {
@@ -214,7 +226,7 @@ static Token read_string(Lexer *lex) {
         advance(lex);
     }
     if (peek(lex) == '\0')
-        return error_token("unterminated string literal", line);
+        return error_token("unterminated string literal", line, col);
     int len = lex->pos - start;
     char *buf = (char *)malloc(len + 1);
     memcpy(buf, lex->source + start, len);
@@ -224,6 +236,7 @@ static Token read_string(Lexer *lex) {
     t.type = TOKEN_STRING;
     t.lexeme = buf;
     t.line = line;
+    t.col = col;
     t.value = 0;
     return t;
 }
@@ -232,10 +245,13 @@ static Token read_string(Lexer *lex) {
 Token lexer_next(Lexer *lex) {
     skip_whitespace_and_comments(lex);
 
-    if (peek(lex) == '\0')
-        return make_token(TOKEN_EOF, lex->line);
-
+    int start_pos = lex->pos;
+    int col = start_pos - lex->line_start + 1;
     int line = lex->line;
+
+    if (peek(lex) == '\0')
+        return make_token(TOKEN_EOF, line, col);
+
     char c = peek(lex);
 
     /* Identifiers and keywords */
@@ -254,57 +270,57 @@ Token lexer_next(Lexer *lex) {
     advance(lex);
     switch (c) {
     case '{':
-        return make_token(TOKEN_LBRACE, line);
+        return make_token(TOKEN_LBRACE, line, col);
     case '}':
-        return make_token(TOKEN_RBRACE, line);
+        return make_token(TOKEN_RBRACE, line, col);
     case '(':
-        return make_token(TOKEN_LPAREN, line);
+        return make_token(TOKEN_LPAREN, line, col);
     case ')':
-        return make_token(TOKEN_RPAREN, line);
+        return make_token(TOKEN_RPAREN, line, col);
     case ';':
-        return make_token(TOKEN_SEMICOLON, line);
+        return make_token(TOKEN_SEMICOLON, line, col);
     case ',':
-        return make_token(TOKEN_COMMA, line);
+        return make_token(TOKEN_COMMA, line, col);
     case '.':
-        return make_token(TOKEN_DOT, line);
+        return make_token(TOKEN_DOT, line, col);
     case ':':
-        return make_token(TOKEN_COLON, line);
+        return make_token(TOKEN_COLON, line, col);
     case '+':
         if (peek(lex) == '+') {
             advance(lex);
-            return make_token_str(TOKEN_INCREMENT, "++", line);
+            return make_token_str(TOKEN_INCREMENT, "++", line, col);
         }
-        return make_token(TOKEN_PLUS, line);
+        return make_token(TOKEN_PLUS, line, col);
     case '-':
-        return make_token(TOKEN_MINUS, line);
+        return make_token(TOKEN_MINUS, line, col);
     case '*':
-        return make_token(TOKEN_STAR, line);
+        return make_token(TOKEN_STAR, line, col);
     case '/':
-        return make_token(TOKEN_SLASH, line);
+        return make_token(TOKEN_SLASH, line, col);
     case '=':
         if (peek(lex) == '=') {
             advance(lex);
-            return make_token_str(TOKEN_EQ, "==", line);
+            return make_token_str(TOKEN_EQ, "==", line, col);
         }
-        return make_token(TOKEN_ASSIGN, line);
+        return make_token(TOKEN_ASSIGN, line, col);
     case '!':
         if (peek(lex) == '=') {
             advance(lex);
-            return make_token_str(TOKEN_NEQ, "!=", line);
+            return make_token_str(TOKEN_NEQ, "!=", line, col);
         }
-        return make_token(TOKEN_NOT, line);
+        return make_token(TOKEN_NOT, line, col);
     case '<':
         if (peek(lex) == '=') {
             advance(lex);
-            return make_token_str(TOKEN_LE, "<=", line);
+            return make_token_str(TOKEN_LE, "<=", line, col);
         }
-        return make_token(TOKEN_LT, line);
+        return make_token(TOKEN_LT, line, col);
     case '>':
         if (peek(lex) == '=') {
             advance(lex);
-            return make_token_str(TOKEN_GE, ">=", line);
+            return make_token_str(TOKEN_GE, ">=", line, col);
         }
-        return make_token(TOKEN_GT, line);
+        return make_token(TOKEN_GT, line, col);
     default:
         break;
     }
@@ -312,7 +328,7 @@ Token lexer_next(Lexer *lex) {
     /* Unknown character: produce an error token */
     char msg[64];
     snprintf(msg, sizeof(msg), "unexpected character '%c'", c);
-    return error_token(msg, line);
+    return error_token(msg, line, col);
 }
 
 /* Free the dynamically allocated lexeme of a token */

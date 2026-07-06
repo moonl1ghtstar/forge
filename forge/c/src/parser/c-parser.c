@@ -6,10 +6,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include "c-parser.h"
+#include "../../../helix/src/errors/forge-errors.h"
 
 static void c_parse_error(CParser *p, const char *msg) {
-    fprintf(stderr, "Forge C parse error: line %d: %s near %s\n",
-            p->current.line, msg, c_token_type_to_string(p->current.type));
+    const char *err_code = "E201";
+    if (p->current.type == C_TOK_ERROR) {
+        err_code = "E001";
+        forge_report_error(SEV_ERROR, err_code, p->current.line, p->current.col, NULL, NULL, "%s", p->current.lexeme ? p->current.lexeme : msg);
+    } else {
+        if (strstr(msg, "expected ')'")) err_code = "E203";
+        else if (strstr(msg, "expected ';'")) err_code = "E204";
+        else if (strstr(msg, "expected '{'")) err_code = "E205";
+        else if (strstr(msg, "expected '='")) err_code = "E206";
+        else if (strstr(msg, "expected identifier") || strstr(msg, "expected function name") || strstr(msg, "expected parameter name") || strstr(msg, "expected variable name")) err_code = "E202";
+        
+        char formatted_msg[256];
+        if (p->current.type != C_TOK_EOF) {
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s, found '%s'", msg, c_token_type_to_string(p->current.type));
+        } else {
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s, found end of file", msg);
+        }
+        
+        forge_report_error(SEV_ERROR, err_code, p->current.line, p->current.col, NULL, NULL, "%s", formatted_msg);
+    }
     p->had_error = 1;
 }
 

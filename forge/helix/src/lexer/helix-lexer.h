@@ -15,6 +15,7 @@ typedef struct {
     const char *source; /* Full source code string (not owned) */
     int pos;            /* Current character index */
     int line;           /* Current line number (1-based) */
+    int line_start;     /* Position of current line start in source */
 } Lexer;
 
 /* Initialize a lexer with the given source code string */

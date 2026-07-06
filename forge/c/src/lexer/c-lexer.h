@@ -11,6 +11,7 @@ typedef struct {
     const char *source;
     int pos;
     int line;
+    int line_start;
 } CLexer;
 
 void c_lexer_init(CLexer *lexer, const char *source);

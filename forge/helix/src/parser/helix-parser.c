@@ -13,6 +13,7 @@
 
 // h
 #include "helix-parser.h"
+#include "../errors/forge-errors.h"
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
@@ -51,10 +52,46 @@ static void describe_token(const Token *tok, char *buf, size_t buf_size) {
 static void parse_error(Parser *p, const char *msg) {
     char tok[128];
     describe_token(&p->current, tok, sizeof(tok));
-    fprintf(stderr, "Forge parse error: line %d: %s", p->current.line, msg);
-    if (p->current.type != TOKEN_EOF)
-        fprintf(stderr, " near %s", tok);
-    fprintf(stderr, "\n");
+    
+    const char *err_code = "E201";
+    int err_line = p->current.line;
+    int err_col = p->current.col;
+
+    if (p->current.type == TOKEN_ERROR) {
+        err_code = "E001";
+        if (p->current.lexeme && strstr(p->current.lexeme, "unterminated string literal")) {
+            err_code = "E002";
+        }
+        forge_report_error(SEV_ERROR, err_code, err_line, err_col, NULL, NULL, "%s", p->current.lexeme ? p->current.lexeme : msg);
+    } else {
+        if (strstr(msg, "expected ')'")) err_code = "E203";
+        else if (strstr(msg, "expected ';'")) {
+            err_code = "E204";
+            if (p->previous.line > 0) {
+                err_line = p->previous.line;
+                err_col = p->previous.col;
+                if (p->previous.lexeme) {
+                    err_col += (int)strlen(p->previous.lexeme);
+                } else {
+                    err_col += 1;
+                }
+            }
+        }
+        else if (strstr(msg, "expected '{'")) err_code = "E205";
+        else if (strstr(msg, "expected '='")) err_code = "E206";
+        else if (strstr(msg, "only function declarations")) err_code = "E207";
+        else if (strstr(msg, "expected an identifier after 'function'")) err_code = "E202";
+        else if (strstr(msg, "expected identifier") || strstr(msg, "expected function name") || strstr(msg, "expected parameter name") || strstr(msg, "expected variable name") || strstr(msg, "expected struct type name") || strstr(msg, "expected field name") || strstr(msg, "expected module name")) err_code = "E202";
+        
+        char formatted_msg[256];
+        if (p->current.type != TOKEN_EOF) {
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s, found %s", msg, tok);
+        } else {
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s, found end of file", msg);
+        }
+        
+        forge_report_error(SEV_ERROR, err_code, err_line, err_col, NULL, NULL, "%s", formatted_msg);
+    }
     p->had_error = 1;
 }
 
@@ -167,8 +204,16 @@ static int peek_token_type(Parser *p, int steps, TokenType *type_out, char **lex
 void parser_init(Parser *parser, Lexer *lexer) {
     parser->lexer = lexer;
     parser->had_error = 0;
+    parser->current.type = TOKEN_EOF;
     parser->current.lexeme = NULL;
+    parser->current.line = 0;
+    parser->current.col = 0;
+    parser->current.value = 0;
+    parser->previous.type = TOKEN_EOF;
     parser->previous.lexeme = NULL;
+    parser->previous.line = 0;
+    parser->previous.col = 0;
+    parser->previous.value = 0;
     advance(parser); /* prime the lookahead */
 }
 
@@ -493,7 +538,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             config_content = read_file(config_path, is_system);
         }
         if (!config_content) {
-            fprintf(stderr, "Forge error: %d: cannot load module '%s' (config.json missing or unreadable)\n", p->current.line, module_name);
+            forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, "note", "config.json missing or unreadable", "failed to import module '%s'", module_name);
             return 1;
         }
 
@@ -516,7 +561,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                     }
                 }
                 if (!found) {
-                    fprintf(stderr, "Forge error: %d: module '%s' does not export function '%s'\n", p->current.line, module_name, select_funcs[i]);
+                    forge_report_error(SEV_ERROR, "E602", p->current.line, p->current.col, NULL, NULL, "symbol '%s' was not found in module '%s'", select_funcs[i], module_name);
                     if (source_dir)
                         free(source_dir);
                     if (module_funcs) {
@@ -539,7 +584,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             char *func_name = funcs_to_load[i];
             char *func_source = read_func_file(module_name, source_dir, func_name, is_system);
             if (!func_source) {
-                fprintf(stderr, "Forge error: %d: cannot load function '%s' from module '%s'\n", p->current.line, func_name, module_name);
+                forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s': cannot load function '%s'", module_name, func_name);
                 if (source_dir)
                     free(source_dir);
                 if (module_funcs) {
@@ -554,7 +599,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             parser_init(&sub, &lexer);
             module_prog = parse_program(&sub);
             if (sub.had_error) {
-                fprintf(stderr, "Forge error: %d: function '%s' in module '%s' has parse errors\n", p->current.line, func_name, module_name);
+                forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s': function '%s' has parse errors", module_name, func_name);
                 ast_free(module_prog);
                 free(func_source);
                 if (source_dir)
@@ -585,7 +630,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
     } else {
         char *project_source = read_file(module_name, is_system);
         if (!project_source) {
-            fprintf(stderr, "Forge error: %d: cannot load module '%s'\n", p->current.line, module_name);
+            forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s'", module_name);
             return 1;
         }
 
@@ -593,7 +638,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
         parser_init(&sub, &lexer);
         module_prog = parse_program(&sub);
         if (sub.had_error) {
-            fprintf(stderr, "Forge error: %d: module '%s' has parse errors\n", p->current.line, module_name);
+            forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s': module has parse errors", module_name);
             ast_free(module_prog);
             free(project_source);
             return 1;
@@ -611,7 +656,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                     }
                 }
                 if (!found) {
-                    fprintf(stderr, "Forge error: %d: module '%s' does not export function '%s'\n", p->current.line, module_name, select_funcs[i]);
+                    forge_report_error(SEV_ERROR, "E602", p->current.line, p->current.col, NULL, NULL, "symbol '%s' was not found in module '%s'", select_funcs[i], module_name);
                     ast_free(module_prog);
                     free(project_source);
                     return 1;
@@ -989,7 +1034,23 @@ static ASTNode *parse_var_decl(Parser *p) {
     Token name = consume(p, TOKEN_IDENT, "expected variable name");
     consume(p, TOKEN_ASSIGN, "expected '=' after variable name");
     ASTNode *init = parse_expr(p);
-    consume(p, TOKEN_SEMICOLON, "expected ';' after variable declaration");
+    /* Capture position right after the expression (= end of last parsed token)
+     * so a missing ';' error points at the declaration line, not the next statement. */
+    if (!check(p, TOKEN_SEMICOLON)) {
+        int err_line = p->previous.line > 0 ? p->previous.line : line;
+        int err_col  = p->previous.col;
+        if (p->previous.lexeme)
+            err_col += (int)strlen(p->previous.lexeme);
+        else
+            err_col += 1;
+        char found_desc[128];
+        describe_token(&p->current, found_desc, sizeof(found_desc));
+        forge_report_error(SEV_ERROR, "E204", err_line, err_col, NULL, NULL,
+            "expected ';' after variable declaration, found %s", found_desc);
+        p->had_error = 1;
+    } else {
+        advance(p); /* consume ';' */
+    }
     return ast_var_decl(strdup(name.lexeme), init, line);
 }
 

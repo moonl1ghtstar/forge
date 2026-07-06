@@ -11,6 +11,7 @@
 #include "../../../helix/src/ir/builder/ir-builder.h"
 #include "../../../helix/src/ir/opt/ir-opt.h"
 #include "../../../helix/src/codegen/helix-codegen.h"
+#include "../../../helix/src/errors/forge-errors.h"
 #include "c-frontend.h"
 #include "../parser/c-parser.h"
 
@@ -51,6 +52,7 @@ int c_parse_program_from_file(const char *source_path, ASTNode **program_out) {
     if (!source)
         return 1;
 
+    forge_set_current_file(source_path, source);
     c_lexer_init(&lexer, source);
     c_parser_init(&parser, &lexer); /* inject_main=1: exe mode */
     program = c_parse_program(&parser);
@@ -82,6 +84,7 @@ int c_parse_program_from_file_lib(const char *source_path, ASTNode **program_out
     if (!source)
         return 1;
 
+    forge_set_current_file(source_path, source);
     c_lexer_init(&lexer, source);
     c_parser_init_lib(&parser, &lexer); /* inject_main=0: library mode */
     program = c_parse_program(&parser);
@@ -136,7 +139,7 @@ int compile_c(const char *source_path, const char *output_path) {
     codegen_emit(ir, out);
     fclose(out);
 
-    printf("Forge: compiled '%s' -> '%s'\n", source_path, output_path);
+
 
     ir_program_free(ir);
     ast_free(program);
@@ -188,7 +191,7 @@ int compile_c_lib(const char *source_path, const char *output_path) {
     codegen_emit(ir, out);
     fclose(out);
 
-    printf("Forge: compiled '%s' -> '%s'\n", source_path, output_path);
+
 
     ir_program_free(ir);
     ast_free(program);
