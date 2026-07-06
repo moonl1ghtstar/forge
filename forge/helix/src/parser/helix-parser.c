@@ -446,6 +446,30 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
     }
 }
 
+/* Remove the implicit main() that parse_program() auto-generates.
+ * Module function files (e.g. print.hlx) contain only extern/function decls,
+ * so parse_program() creates a spurious main. If kept, it becomes
+ * console_main after renaming and collides across module files. */
+static void strip_module_main(ASTNode *module_prog) {
+    int i;
+    if (!module_prog || module_prog->type != AST_PROGRAM)
+        return;
+    for (i = 0; i < module_prog->as.program.count; i++) {
+        ASTNode *node = module_prog->as.program.functions[i];
+        if (node && node->type == AST_FUNCTION &&
+            strcmp(node->as.function.name, "main") == 0) {
+            ast_free(node);
+            /* Shift remaining entries down */
+            int j;
+            for (j = i; j < module_prog->as.program.count - 1; j++) {
+                module_prog->as.program.functions[j] = module_prog->as.program.functions[j + 1];
+            }
+            module_prog->as.program.count--;
+            i--; /* re-check this index */
+        }
+    }
+}
+
 static void rename_module_functions(ASTNode *module_prog, const char *module_name) {
     if (!module_prog || module_prog->type != AST_PROGRAM)
         return;
@@ -543,6 +567,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                 return 1;
             }
 
+            strip_module_main(module_prog);
             rename_module_functions(module_prog, module_name);
             append_program(prog, module_prog);
             ast_free(module_prog);
@@ -607,6 +632,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             free(project_source);
             return 0;
         } else {
+            strip_module_main(module_prog);
             rename_module_functions(module_prog, module_name);
             append_program(prog, module_prog);
             ast_free(module_prog);

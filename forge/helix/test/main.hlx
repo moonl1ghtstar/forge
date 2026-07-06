@@ -1,3 +1,7 @@
 import console
 
-console.print("Pls Say Hello..");
+let a = console.input();
+
+console.print("Hello World");
+console.color(0xFF0000);
+console.print(a);
