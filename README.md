@@ -2,25 +2,27 @@
 
 Forge is a multi-language compiler front-end targeting Windows x64.
 It compiles `.hlx` (Helix) and `.c` (C subset) source files into
-x86-64 Windows assembly and can drive NASM and `ld` to produce native `.exe` binaries.
+x86-64 Windows assembly and drives NASM and `ld` to produce native `.exe` binaries.
 
 ---
 
 ## Language Support
 
-### Helix
+### Helix (`.hlx`)
 
-A small JavaScript-style language built for command-line programs:
+A small, JavaScript-style language built for command-line programs:
 
 - `function` declarations
 - Top-level statements (auto-wrapped into `main`)
 - Variables: `var`, `let`, `const`, `global`
 - Control flow: `if`, `else`, `while`, `until`, `do`, `for`, `switch`
 - Loop control: `break()`, `pass()`
-- Module imports
+- Module imports: `import <module>`
+- Selective imports: `import <module> { func1, func2 }`
 - `extern` function declarations (FFI)
+- Struct types and field access
 
-### C subset
+### C subset (`.c`)
 
 A minimal C frontend sharing the same AST, IR, and codegen as Helix:
 
@@ -35,24 +37,82 @@ A minimal C frontend sharing the same AST, IR, and codegen as Helix:
 ## Project Layout
 
 ```
-forge/
-  main.c                  Entry point, CLI, pipeline dispatcher
-  helix/src/
-    lexer/                Helix lexer
-    parser/               Helix parser
-    sema/                 Semantic analysis (shared by C frontend)
-    ir/                   IR builder, optimizer, and data model
-    codegen/              x86-64 codegen (Windows x64 ABI, shared by both)
-    ast/                  AST node types
-  c/src/
-    lexer/                C lexer
-    parser/               C parser
-    frontend/             C frontend (parse → sema → codegen)
-docs/                     Language grammar and notes
-samples/                  Sample programs (.hlx and .c)
-module/                   Built-in modules
-build.bat                 Builds forge.exe with gcc
+forge/                        Root
+  build.bat                   Builds forge.exe with gcc, then copies module/ → forge/bin/lib/
+  module/                     Built-in module sources
+    helix/
+      console/                console module (print, input, clear, color)
+        config.json           Module manifest (name, version, funcs list)
+        src/                  Per-function .hlx source files
+  forge/
+    main.c                    Entry point, CLI, pipeline dispatcher
+    helix/
+      src/
+        lexer/                Helix lexer
+        parser/               Helix parser (recursive descent)
+        sema/                 Semantic analysis (shared by C frontend)
+        ir/                   IR data model, builder, and optimizer
+        codegen/              x86-64 codegen (Windows x64 ABI)
+        ast/                  AST node types
+        errors/               Structured error reporting (colored, aligned)
+      test/                   Manual test programs (.hlx)
+      docs/                   Grammar reference
+    c/
+      src/
+        lexer/                C lexer
+        parser/               C parser
+        frontend/             C frontend (parse → sema → codegen)
+    bin/
+      bin/                    forge.exe, fg.exe, 4g.exe
+      lib/                    Module files (copied here by build.bat)
 ```
+
+---
+
+## Error Reporting
+
+Forge emits structured, colored diagnostics in the style of rustc:
+
+```
+error[E204]: expected ';' after variable declaration, found identifier 'console'
+ --> main.hlx:3:10
+  |
+3 | let a = 0
+  |          ^
+  |
+```
+
+- **Colors**: `error` in red, `warn` in yellow, source location in cyan, code in bold
+- **Aligned gutter**: `|` columns adjust dynamically to the line number width
+- **Accurate pointers**: `^` points to the end of the offending token, not the next statement
+
+Implemented in [`forge/helix/src/errors/forge-errors.c`](forge/helix/src/errors/forge-errors.c).
+
+---
+
+## Modules
+
+Modules live under `module/helix/<name>/` and are loaded via `import <name>` in Helix source.
+
+Each module directory contains:
+- `config.json` — module manifest listing the name, version, source directory, and exported functions
+- `src/<func>.hlx` — one `.hlx` file per exported function
+
+**Available modules:**
+
+| Module    | Functions                      | Description                  |
+|-----------|-------------------------------|------------------------------|
+| `console` | `print`, `input`, `clear`, `color` | Terminal I/O and formatting |
+
+### Import syntax
+
+```hlx
+import console              // import all functions from console
+import console { print }    // selective import
+```
+
+At build time, `build.bat` copies the entire `module/` tree into `forge/bin/lib/`
+so the runtime can locate module files relative to the executable.
 
 ---
 
@@ -69,8 +129,8 @@ source (.hlx or .c)
 ```
 
 Both language frontends produce identical `.asm` output through the same
-`codegen_emit()` entry point, so the resulting `.obj` files share the same
-Windows x64 ABI and can be freely linked together.
+`codegen_emit()` entry point, so `.obj` files share the same Windows x64 ABI
+and can be freely linked together.
 
 ---
 
@@ -78,87 +138,75 @@ Windows x64 ABI and can be freely linked together.
 
 - Windows (x64)
 - MSYS2 / MinGW64 toolchain
-  - `gcc` (builds the forge compiler itself)
-  - `nasm` (assembles `.asm` → `.obj`)
-  - `ld` (links `.obj` → `.exe`)
+  - `gcc` — builds the Forge compiler itself
+  - `nasm` — assembles `.asm` → `.obj`
+  - `ld` — links `.obj` → `.exe`
 
 ---
 
 ## Build Forge
 
-```powershell
-.\build.bat
+```bat
+build.bat
 ```
 
-Or manually:
-
-```powershell
-gcc -std=c11 -O2 -Wall -Wextra `
-  -Iforge\helix\src -Iforge\helix\src\ast -Iforge\helix\src\lexer `
-  -Iforge\helix\src\parser -Iforge\helix\src\sema -Iforge\helix\src\ir -Iforge\helix\src\codegen `
-  -Iforge\c\src -Iforge\c\src\lexer -Iforge\c\src\parser -Iforge\c\src\frontend `
-  forge\main.c forge\helix\src\lexer\helix-lexer.c `
-  forge\helix\src\parser\helix-parser.c forge\helix\src\ast\helix-ast.c `
-  forge\helix\src\sema\helix-sema.c forge\helix\src\ir\ir.c `
-  forge\helix\src\ir\builder\ir-builder.c forge\helix\src\ir\ir-opt.c `
-  forge\helix\src\codegen\helix-codegen.c `
-  forge\c\src\lexer\c-lexer.c forge\c\src\parser\c-parser.c `
-  forge\c\src\frontend\c-frontend.c -o forge\bin\forge.exe
-```
+What `build.bat` does:
+1. Compiles all Forge C sources with `gcc -std=c11 -O2`
+2. Writes `forge.exe`, `fg.exe`, `4g.exe` to `forge/bin/bin/`
+3. Copies `module/` → `forge/bin/lib/` (creates `lib/` if missing)
 
 ---
 
 ## Usage
 
-Add `forge\bin` to your `PATH`, then:
+Add `forge\bin\bin` to your `PATH`, then use `forge`, `fg`, or `4g` interchangeably.
+
+### Compile and run
+
+```powershell
+# Compile + link → .exe
+forge src.hlx
+4g src.hlx
+
+# Compile, link, then run immediately
+forge src.hlx -run
+```
 
 ### Output modes
 
 ```powershell
-# Default: compile + link → .exe
-forge src.hlx
-forge src.c
-
-# -asm: emit assembly text only (debug / preview)
+# -asm: emit assembly text only
 forge src.hlx -asm
-forge src.c   -asm -o output.asm
+forge src.hlx -asm -o out.asm
 
 # -obj: compile → .obj via nasm (stop before link)
 forge src.hlx -obj
-forge src.c   -obj -o lib.obj
-```
-
-### Run after build
-
-```powershell
-forge src.hlx -run
+forge src.hlx -obj -o lib.obj
 ```
 
 ### Debug / inspection
 
 ```powershell
 forge src.hlx -dump-tokens
-forge src.c   -dump-ast
+forge src.hlx -dump-ast
+forge src.hlx -dump-ir
 ```
 
 ### Cross-language linking
 
-Compile Helix and C sources independently to `.obj`, then link them
-in a single `forge -link` call under the same Windows x64 ABI linker:
-
 ```powershell
 # Step 1 – compile each source to an object file
-forge samples\hello_helix.hlx -obj -o samples\helix.obj
-forge samples\hello_c.c       -obj -o samples\clib.obj
+forge samples\hello.hlx    -obj -o samples\helix.obj
+forge samples\mylib.c      -obj -o samples\clib.obj
 
-# Step 2 – link both objects into one exe
+# Step 2 – link into a single exe
 forge -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
 
 # Step 3 – run
 samples\mixed.exe
 ```
 
-You can also mix Forge `.obj` with objects produced by `gcc -c`:
+You can also mix Forge `.obj` with objects from `gcc -c`:
 
 ```powershell
 gcc -c -O2 mylib.c -o mylib.obj
@@ -166,12 +214,12 @@ forge src.hlx -obj -o src.obj
 forge -link src.obj mylib.obj -o program.exe
 ```
 
-**ABI compatibility notes:**
-- All Forge-generated code targets the Windows x64 ABI  
+**ABI compatibility:**
+- All Forge-generated code targets the Windows x64 ABI
   (first 4 integer args in `rcx/rdx/r8/r9`, 32-byte shadow space, 16-byte stack alignment).
-- `global` symbols in Forge `.asm` are plain COFF public symbols (no leading underscore on x64).
-- `extern` declarations in Helix/C source resolve directly to matching COFF exports.
-- `gcc -c` with MinGW64 produces the same COFF format and ABI, so symbols link without mangling.
+- `global` symbols are plain COFF public symbols (no leading underscore on x64).
+- `extern` declarations resolve directly to matching COFF exports.
+- `gcc -c` with MinGW64 produces the same COFF format and ABI — symbols link without mangling.
 
 ---
 
@@ -198,10 +246,13 @@ forge -link src.obj mylib.obj -o program.exe
 ```hlx
 import console
 
-function main() {
-    console.print("Hello from Helix!");
-    return 0;
+let message = "Hello from Helix!";
+
+function greet(name) {
+    console.print(name);
 }
+
+greet(message);
 ```
 
 ### C subset
@@ -224,20 +275,25 @@ int main() {
 
 ### Near-term
 
-- [x] Helix frontend
+- [x] Helix frontend (lexer, parser, sema, codegen)
 - [x] C frontend (int subset)
 - [x] Shared AST and codegen
 - [x] Shared IR layer between semantic analysis and codegen
+- [x] Structured, colored error diagnostics with aligned source pointers
+- [x] Module system (`import`, selective imports, `config.json` manifest)
+- [x] `console` built-in module (`print`, `input`, `clear`, `color`)
 - [x] `-asm` assembly preview
 - [x] `-obj` object file output
 - [x] `-link` multi-object linker
+- [x] Auto-copy modules to `forge/bin/lib/` on build
 - [ ] String literals in C frontend
 - [ ] `printf`/`scanf` builtins in C frontend
+- [ ] More built-in modules (e.g., `math`, `fs`)
 
 ### Long-term architecture
 
 - One compiler core, many language frontends
-- One shared IR layer for Helix and C
+- One shared IR layer for all languages
 - Multiple backends (current: NASM x86-64; future: LLVM IR, direct ELF/COFF emit)
-- Consistent diagnostics across every language
-- Go frontend (separate package-aware loader, no forced Helix model)
+- Consistent, rich diagnostics across every language
+- Go frontend (separate package-aware loader)
