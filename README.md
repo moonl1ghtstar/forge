@@ -201,8 +201,8 @@ forge src.hlx -dump-ir
 
 ```powershell
 # Step 1 – compile each source to an object file
-forge samples\hello.hlx    -obj -o samples\helix.obj
-forge samples\mylib.c      -obj -o samples\clib.obj
+forge samples\hello_mixed.hlx    -obj -o samples\helix.obj
+forge samples\mylib.c            -obj -o samples\clib.obj
 
 # Step 2 – link into a single exe
 forge -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
@@ -291,6 +291,7 @@ int main() {
 - [x] `-obj` object file output
 - [x] `-link` multi-object linker
 - [x] Auto-copy modules to `forge/bin/lib/` on build
+- [x] Auto parameter type inference for Helix parameters (string vs int)
 - [ ] String literals in C frontend
 - [ ] `printf`/`scanf` builtins in C frontend
 - [ ] More built-in modules (e.g., `math`, `fs`)

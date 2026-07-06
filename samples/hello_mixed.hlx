@@ -1,0 +1,17 @@
+// Cross-language linking demo (Helix side).
+// This calls square() defined in mylib.c.
+//
+// Build steps:
+//   forge samples\hello_mixed.hlx -obj -o samples\helix.obj
+//   forge samples\mylib.c         -obj -o samples\clib.obj
+//   forge -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
+//   samples\mixed.exe
+
+import console
+
+extern {
+    function square(x) -> int;
+}
+
+let result = square(7);
+console.print(result);

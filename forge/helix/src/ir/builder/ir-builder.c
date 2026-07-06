@@ -31,6 +31,7 @@ typedef struct {
     StructInfo *structs;
     int struct_count;
     int struct_cap;
+    ASTNode *root_program;
 } IRBuilder;
 
 static IRBasicBlock *current_block(IRBuilder *b) {
@@ -699,14 +700,98 @@ static void lower_block(IRBuilder *b, ASTNode *node) {
     }
 }
 
+static void find_calls(ASTNode *node, const char *target_func, int param_idx, int *out_is_string) {
+    if (!node) return;
+    int i;
+    if (node->type == AST_CALL && node->as.call.name && strcmp(node->as.call.name, target_func) == 0) {
+        if (param_idx < node->as.call.arg_count) {
+            ASTNode *arg = node->as.call.args[param_idx];
+            if (arg && arg->resolved_type && strcmp(arg->resolved_type, "str") == 0) {
+                *out_is_string = 1;
+                return;
+            }
+        }
+    }
+    // Traverse children
+    switch (node->type) {
+    case AST_PROGRAM:
+        for (i = 0; i < node->as.program.count; i++)
+            find_calls(node->as.program.functions[i], target_func, param_idx, out_is_string);
+        break;
+    case AST_FUNCTION:
+        find_calls(node->as.function.body, target_func, param_idx, out_is_string);
+        break;
+    case AST_BLOCK:
+        for (i = 0; i < node->as.block.count; i++)
+            find_calls(node->as.block.stmts[i], target_func, param_idx, out_is_string);
+        break;
+    case AST_VAR_DECL:
+        find_calls(node->as.var_decl.init, target_func, param_idx, out_is_string);
+        break;
+    case AST_ASSIGN:
+        find_calls(node->as.assign.value, target_func, param_idx, out_is_string);
+        break;
+    case AST_IF:
+        find_calls(node->as.if_stmt.cond, target_func, param_idx, out_is_string);
+        find_calls(node->as.if_stmt.then_block, target_func, param_idx, out_is_string);
+        find_calls(node->as.if_stmt.else_block, target_func, param_idx, out_is_string);
+        break;
+    case AST_WHILE:
+        find_calls(node->as.while_stmt.cond, target_func, param_idx, out_is_string);
+        find_calls(node->as.while_stmt.body, target_func, param_idx, out_is_string);
+        break;
+    case AST_RETURN:
+        find_calls(node->as.return_stmt.expr, target_func, param_idx, out_is_string);
+        break;
+    case AST_BINARY:
+        find_calls(node->as.binary.left, target_func, param_idx, out_is_string);
+        find_calls(node->as.binary.right, target_func, param_idx, out_is_string);
+        break;
+    case AST_UNARY:
+        find_calls(node->as.unary.operand, target_func, param_idx, out_is_string);
+        break;
+    case AST_CALL:
+        for (i = 0; i < node->as.call.arg_count; i++)
+            find_calls(node->as.call.args[i], target_func, param_idx, out_is_string);
+        break;
+    case AST_STRUCT_INIT:
+        for (i = 0; i < node->as.struct_init.value_count; i++)
+            find_calls(node->as.struct_init.values[i], target_func, param_idx, out_is_string);
+        break;
+    case AST_FIELD_ACCESS:
+        find_calls(node->as.field_access.object, target_func, param_idx, out_is_string);
+        break;
+    case AST_EXPR_STMT:
+        find_calls(node->as.expr_stmt.expr, target_func, param_idx, out_is_string);
+        break;
+    case AST_FOR:
+        find_calls(node->as.for_stmt.init, target_func, param_idx, out_is_string);
+        find_calls(node->as.for_stmt.cond, target_func, param_idx, out_is_string);
+        find_calls(node->as.for_stmt.incr, target_func, param_idx, out_is_string);
+        find_calls(node->as.for_stmt.body, target_func, param_idx, out_is_string);
+        break;
+    case AST_DO_WHILE:
+        find_calls(node->as.while_stmt.cond, target_func, param_idx, out_is_string);
+        find_calls(node->as.while_stmt.body, target_func, param_idx, out_is_string);
+        break;
+    default:
+        break;
+    }
+}
+
 static void lower_function(IRBuilder *b, ASTNode *node) {
     int i;
     char block_name[128];
     IRFunction *func;
 
     b->func = ir_function_new(node->as.function.name, 0);
-    for (i = 0; i < node->as.function.param_count; i++)
-        ir_function_add_local(b->func, node->as.function.params[i], 8, 0);
+    for (i = 0; i < node->as.function.param_count; i++) {
+        int is_str = 0;
+        if (b->root_program) {
+            find_calls(b->root_program, node->as.function.name, i, &is_str);
+        }
+        ir_function_add_local(b->func, node->as.function.params[i], 8, is_str);
+    }
     for (i = 0; i < node->as.function.param_count; i++) {
         b->func->params = (char **)realloc(b->func->params, sizeof(char *) * (b->func->param_count + 1));
         b->func->params[b->func->param_count++] = strdup(node->as.function.params[i]);
@@ -737,6 +822,7 @@ IRProgram *ir_build_program(ASTNode *program) {
     memset(&b, 0, sizeof(b));
     b.program = ir_program_new();
     b.current_block = -1;
+    b.root_program = program;
     register_structs_from_node(&b, program);
     for (i = 0; i < program->as.program.count; i++) {
         ASTNode *node = program->as.program.functions[i];
