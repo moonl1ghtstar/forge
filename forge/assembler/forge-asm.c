@@ -135,24 +135,35 @@ int forge_assemble_text(const char *asm_text, const char *obj_path) {
                       (curr_section == 2 ? data_offset : bss_offset),
                       curr_section);
         }
-        else if (s->kind == ASM_STMT_DB) {
-            if (s->label) {
-                label_add(&label_table, s->label, data_offset, 2);
-            }
+        else if (s->kind == ASM_STMT_DB || s->kind == ASM_STMT_DW ||
+                 s->kind == ASM_STMT_DD || s->kind == ASM_STMT_DQ) {
+            int elem_size = (s->kind == ASM_STMT_DB) ? 1 :
+                            (s->kind == ASM_STMT_DW) ? 2 :
+                            (s->kind == ASM_STMT_DD) ? 4 : 8;
+            /* Data always goes into the current section's data area */
+            int sec = (curr_section == 2) ? 2 : curr_section;
+            uint32_t *off_ptr = (sec == 1) ? &text_offset :
+                                (sec == 2) ? &data_offset : &bss_offset;
+            if (s->label)
+                label_add(&label_table, s->label, *off_ptr, sec);
             uint32_t size = 0;
             for (j = 0; j < s->db_count; j++) {
                 if (s->db_entries[j].is_string)
-                    size += s->db_entries[j].as.str.len;
+                    size += (uint32_t)s->db_entries[j].as.str.len;
                 else
-                    size += 1;
+                    size += (uint32_t)elem_size;
             }
-            data_offset += size;
+            *off_ptr += size;
         }
-        else if (s->kind == ASM_STMT_RESB) {
-            if (s->label) {
+        else if (s->kind == ASM_STMT_RESB || s->kind == ASM_STMT_RESW ||
+                 s->kind == ASM_STMT_RESD || s->kind == ASM_STMT_RESQ) {
+            int esz = s->res_elem_size ? s->res_elem_size :
+                      (s->kind == ASM_STMT_RESB) ? 1 :
+                      (s->kind == ASM_STMT_RESW) ? 2 :
+                      (s->kind == ASM_STMT_RESD) ? 4 : 8;
+            if (s->label)
                 label_add(&label_table, s->label, bss_offset, 3);
-            }
-            bss_offset += s->resb_count;
+            bss_offset += (uint32_t)(s->resb_count * esz);
         }
         else if (s->kind == ASM_STMT_INSTR) {
             if (s->label) {
@@ -183,15 +194,23 @@ int forge_assemble_text(const char *asm_text, const char *obj_path) {
             else if (strcmp(s->section_name, ".data") == 0) curr_section = 2;
             else if (strcmp(s->section_name, ".bss") == 0) curr_section = 3;
         }
-        else if (s->kind == ASM_STMT_DB) {
+        else if (s->kind == ASM_STMT_DB || s->kind == ASM_STMT_DW ||
+                 s->kind == ASM_STMT_DD || s->kind == ASM_STMT_DQ) {
+            int elem_size = (s->kind == ASM_STMT_DB) ? 1 :
+                            (s->kind == ASM_STMT_DW) ? 2 :
+                            (s->kind == ASM_STMT_DD) ? 4 : 8;
+            CoffSection *dsec = (curr_section == 1) ? &text_sec : &data_sec;
             for (j = 0; j < s->db_count; j++) {
                 if (s->db_entries[j].is_string) {
                     int k;
-                    for (k = 0; k < s->db_entries[j].as.str.len; k++) {
-                        sec_append_byte(&data_sec, (uint8_t)s->db_entries[j].as.str.data[k]);
-                    }
+                    for (k = 0; k < s->db_entries[j].as.str.len; k++)
+                        sec_append_byte(dsec, (uint8_t)s->db_entries[j].as.str.data[k]);
                 } else {
-                    sec_append_byte(&data_sec, (uint8_t)s->db_entries[j].as.byte_val);
+                    /* emit elem_size bytes, little-endian */
+                    long v = s->db_entries[j].as.byte_val;
+                    int b;
+                    for (b = 0; b < elem_size; b++)
+                        sec_append_byte(dsec, (uint8_t)((v >> (b * 8)) & 0xFF));
                 }
             }
         }

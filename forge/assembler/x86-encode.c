@@ -12,10 +12,13 @@
  *
  * Supported mnemonics (superset of Forge's codegen output):
  *   mov, lea, push, pop, ret, call, jmp
- *   je/jz, jne/jnz, jg, jl, jge, jle, ja, jb
- *   add, sub, imul, idiv, neg, cdq, cqo
- *   cmp, test, xor, or, and, not, movzx
- *   setg, setl, sete/setz, setne/setnz, setge, setle, setb
+ *   je/jz, jne/jnz, jg, jl, jge, jle, ja, jb, jo, jno, js, jns, jp, jnp
+ *   add, sub, cmp, test
+ *   imul, mul, idiv, div, neg, inc, dec, cdq, cqo
+ *   and, or, xor, not
+ *   shl, shr, sar, rol, ror
+ *   mov, movzx, movsx, lea
+ *   sete/setz, setne/setnz, setg, setge, setl, setle, setb, seta, seto, sets
  *   nop
  */
 #include <stdio.h>
@@ -83,47 +86,94 @@ void x86_add_reloc(X86EncodeCtx *ctx, uint32_t offset, const char *sym) {
 /* ---- Memory encoding helpers ---- */
 
 /*
- * Emit ModRM + SIB + displacement for a memory operand [base ± disp].
- * `reg_field` is the reg/opcode field in ModRM.
- * Returns bytes written or -1.
+ * emit_mem — unified memory operand encoder.
+ * Handles BASE_ONLY, BASE_DISP, and SIB kinds.
+ * reg_field: reg/opcode field in ModRM.
+ * Returns 0 on success, -1 on overflow.
  */
-static int emit_mem_base_disp(uint8_t *buf, int *n_ptr, int buf_size,
-                               int reg_field, const AsmMemOp *mem) {
+static int emit_mem(uint8_t *buf, int *n_ptr, int buf_size,
+                    int reg_field, const AsmMemOp *mem) {
     int n = *n_ptr;
-    int base = mem->base_reg;
-    long disp = mem->disp;
-    int need_sib = (REGLO(base) == 4); /* rsp (and r12) need SIB */
-    int mod;
 
-    if (disp == 0 && REGLO(base) != 5 /* rbp needs disp0 */) {
-        mod = 0;
-    } else if (fits_imm8(disp)) {
-        mod = 1;
-    } else {
-        mod = 2;
-    }
-    /* rbp/r13 with mod=0 would be interpreted as RIP-relative; force mod=1 */
-    if (mod == 0 && REGLO(base) == 5)
-        mod = 1;
-
-    /* ModRM */
-    if (need_sib) {
-        EMIT((mod << 6) | (REGLO(reg_field) << 3) | 4 /* SIB follows */);
-        /* SIB: scale=0, index=4(none), base=rsp/r12 */
-        EMIT((0 << 6) | (4 << 3) | REGLO(base));
-    } else {
-        EMIT((mod << 6) | (REGLO(reg_field) << 3) | REGLO(base));
+    if (mem->kind == MEMKIND_BASE_ONLY) {
+        int base = mem->base_reg;
+        int need_sib = (REGLO(base) == 4); /* rsp/r12 always need SIB */
+        /* mod=00, but rbp/r13 with mod=00 means disp32 — force mod=01 disp=0 */
+        int mod = (REGLO(base) == 5) ? 1 : 0;
+        if (need_sib) {
+            EMIT((mod << 6) | (REGLO(reg_field) << 3) | 4);
+            EMIT((0 << 6) | (4 << 3) | REGLO(base)); /* no index */
+        } else {
+            EMIT((mod << 6) | (REGLO(reg_field) << 3) | REGLO(base));
+        }
+        if (mod == 1) EMIT(0); /* disp8=0 for rbp/r13 */
+        *n_ptr = n;
+        return 0;
     }
 
-    /* Displacement */
-    if (mod == 1) {
-        EMIT((uint8_t)(disp & 0xFF));
-    } else if (mod == 2) {
-        uint32_t d = (uint32_t)(int32_t)disp;
-        EMIT(d & 0xFF); EMIT((d>>8)&0xFF); EMIT((d>>16)&0xFF); EMIT((d>>24)&0xFF);
+    if (mem->kind == MEMKIND_SIB) {
+        int base  = mem->base_reg;
+        int index = mem->index_reg; /* -1 = none */
+        long disp = mem->disp;
+        int scale = mem->scale;     /* 1,2,4,8 */
+        int ss = (scale == 8) ? 3 : (scale == 4) ? 2 : (scale == 2) ? 1 : 0;
+        int mod;
+        if (disp == 0 && REGLO(base) != 5) mod = 0;
+        else if (fits_imm8(disp))          mod = 1;
+        else                               mod = 2;
+        if (mod == 0 && REGLO(base) == 5)  mod = 1;
+
+        EMIT((mod << 6) | (REGLO(reg_field) << 3) | 4); /* SIB follows */
+        int idx_field = (index < 0) ? 4 : REGLO(index); /* 4 = no index */
+        EMIT((ss << 6) | (idx_field << 3) | REGLO(base));
+
+        if (mod == 1) { EMIT((uint8_t)(disp & 0xFF)); }
+        else if (mod == 2) {
+            uint32_t d = (uint32_t)(int32_t)disp;
+            EMIT(d&0xFF); EMIT((d>>8)&0xFF); EMIT((d>>16)&0xFF); EMIT((d>>24)&0xFF);
+        }
+        *n_ptr = n;
+        return 0;
     }
-    *n_ptr = n;
-    return 0;
+
+    /* MEMKIND_BASE_DISP */
+    {
+        int base = mem->base_reg;
+        long disp = mem->disp;
+        int need_sib = (REGLO(base) == 4); /* rsp/r12 need SIB */
+        int mod;
+        if      (disp == 0 && REGLO(base) != 5) mod = 0;
+        else if (fits_imm8(disp))               mod = 1;
+        else                                    mod = 2;
+        if (mod == 0 && REGLO(base) == 5)       mod = 1;
+
+        if (need_sib) {
+            EMIT((mod << 6) | (REGLO(reg_field) << 3) | 4);
+            EMIT((0 << 6) | (4 << 3) | REGLO(base));
+        } else {
+            EMIT((mod << 6) | (REGLO(reg_field) << 3) | REGLO(base));
+        }
+        if (mod == 1) { EMIT((uint8_t)(disp & 0xFF)); }
+        else if (mod == 2) {
+            uint32_t d = (uint32_t)(int32_t)disp;
+            EMIT(d&0xFF); EMIT((d>>8)&0xFF); EMIT((d>>16)&0xFF); EMIT((d>>24)&0xFF);
+        }
+        *n_ptr = n;
+        return 0;
+    }
+}
+
+/* REX bits for a full SIB/BASE_ONLY/BASE_DISP mem operand */
+static uint8_t rex_for_mem_full(int W, int reg_op, const AsmMemOp *mem) {
+    int R = REGHI(reg_op);
+    int B = 0, X = 0;
+    if (mem->kind == MEMKIND_BASE_DISP || mem->kind == MEMKIND_BASE_ONLY ||
+        mem->kind == MEMKIND_SIB) {
+        B = REGHI(mem->base_reg);
+        if (mem->kind == MEMKIND_SIB && mem->index_reg >= 0)
+            X = REGHI(mem->index_reg);
+    }
+    return REX(W, R, X, B);
 }
 
 /* ---- REX prefix for a register-memory instruction ----
@@ -132,9 +182,11 @@ static int emit_mem_base_disp(uint8_t *buf, int *n_ptr, int buf_size,
  * W:      1 for 64-bit operand
  */
 static uint8_t rex_for_mem(int W, int reg_op, const AsmMemOp *mem) {
-    int R = REGHI(reg_op);
-    int B = (mem->kind == MEMKIND_BASE_DISP) ? REGHI(mem->base_reg) : 0;
-    return REX(W, R, 0, B);
+    if (mem->kind == MEMKIND_BASE_DISP || mem->kind == MEMKIND_BASE_ONLY ||
+        mem->kind == MEMKIND_SIB)
+        return rex_for_mem_full(W, reg_op, mem);
+    /* RIP_REL: B=0, X=0 */
+    return REX(W, REGHI(reg_op), 0, 0);
 }
 
 /* ---- Emit rel32 for a label (forward/backward/extern) ---- */
@@ -223,11 +275,10 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_MEM) {
         int W = (dst->reg_size == 64);
         if (src->mem.kind == MEMKIND_RIP_REL) {
-            /* RIP-relative: 8B /r  mod=00 rm=101 disp32 */
-            EMIT(rex_for_mem(W, dst->reg_idx, &src->mem));
+            uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, 0);
+            if (rex != 0x40 || W) EMIT(rex);
             EMIT(0x8B);
             EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5 /* RIP */);
-            /* rel32: filled by relocation, default addend is 0 */
             uint32_t rel_off = ctx->section_offset + n;
             x86_add_reloc(ctx, rel_off, src->mem.symbol);
             EMIT(0); EMIT(0); EMIT(0); EMIT(0);
@@ -235,8 +286,7 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
             uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
             if (rex != 0x40 || W) EMIT(rex);
             EMIT(0x8B);
-            if (emit_mem_base_disp(buf, &n, buf_size,
-                                   dst->reg_idx, &src->mem) < 0)
+            if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
                 return -1;
         }
         return n;
@@ -246,7 +296,8 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
     if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG) {
         int W = (src->reg_size == 64);
         if (dst->mem.kind == MEMKIND_RIP_REL) {
-            EMIT(rex_for_mem(W, src->reg_idx, &dst->mem));
+            uint8_t rex = REX(W, REGHI(src->reg_idx), 0, 0);
+            if (rex != 0x40 || W) EMIT(rex);
             EMIT(0x89);
             EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
             uint32_t rel_off = ctx->section_offset + n;
@@ -256,8 +307,7 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
             uint8_t rex = rex_for_mem(W, src->reg_idx, &dst->mem);
             if (rex != 0x40 || W) EMIT(rex);
             EMIT(0x89);
-            if (emit_mem_base_disp(buf, &n, buf_size,
-                                   src->reg_idx, &dst->mem) < 0)
+            if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
                 return -1;
         }
         return n;
@@ -278,7 +328,8 @@ static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
     }
     int W = (dst->reg_size == 64);
     if (src->mem.kind == MEMKIND_RIP_REL) {
-        EMIT(rex_for_mem(W, dst->reg_idx, &src->mem));
+        uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, 0);
+        if (rex != 0x40 || W) EMIT(rex);
         EMIT(0x8D);
         EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5 /* RIP */);
         uint32_t rel_off = ctx->section_offset + n;
@@ -288,8 +339,7 @@ static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
         uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
         if (rex != 0x40 || W) EMIT(rex);
         EMIT(0x8D);
-        if (emit_mem_base_disp(buf, &n, buf_size,
-                               dst->reg_idx, &src->mem) < 0)
+        if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
             return -1;
     }
     return n;
@@ -349,60 +399,146 @@ static int encode_alu(const AsmStatement *stmt, uint8_t *buf, int buf_size,
             return -1;
         return n;
     }
+    /* dst=reg, src=[mem] */
+    if (dst->kind == ASMOP_REG && src->kind == ASMOP_MEM) {
+        /* rm form: opcode_rr - 8 (e.g. ADD 03->03, SUB 2B->2B, already rm form) */
+        uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(opcode_rr); /* these are already the /r (reg,rm) form */
+        if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
+            return -1;
+        return n;
+    }
+    /* dst=[mem], src=reg */
+    if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG) {
+        /* mr form: opcode_rr - 3 (03->01=ADD, 0B->09=OR, 23->21=AND, 2B->29=SUB, 33->31=XOR, 3B->39=CMP) */
+        uint8_t mr_op = opcode_rr - 2; /* reg field is src, rm is dst */
+        uint8_t rex = rex_for_mem(W, src->reg_idx, &dst->mem);
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(mr_op);
+        if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
+            return -1;
+        return n;
+    }
     fprintf(stderr, "forge-asm: line %d: unsupported ALU form for '%s'\n",
             stmt->line, stmt->mnemonic);
     return -1;
 }
 
-/* MOVZX: movzx dst32, src8 */
+/* MOVZX: movzx r32/64, r/m8  — zero-extend byte to 32 or 64 bit */
 static int encode_movzx(const AsmStatement *stmt,
                          uint8_t *buf, int buf_size) {
     int n = 0;
     const AsmOperand *dst = &stmt->operands[0];
     const AsmOperand *src = &stmt->operands[1];
-    if (dst->kind != ASMOP_REG || src->kind != ASMOP_REG) {
-        fprintf(stderr, "forge-asm: line %d: MOVZX requires reg, reg\n", stmt->line);
+    if (dst->kind != ASMOP_REG) {
+        fprintf(stderr, "forge-asm: line %d: MOVZX requires reg dst\n", stmt->line);
         return -1;
     }
-    /* movzx r32, r/m8: 0F B6 /r  (zero-extends to 64-bit) */
-    uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
-    if (rex != 0x40) EMIT(rex);
-    EMIT(0x0F); EMIT(0xB6);
-    EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    int W = (dst->reg_size == 64);
+    if (src->kind == ASMOP_REG) {
+        /* movzx r32/64, r/m8: 0F B6 /r  (zero-extends to 64-bit) */
+        uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0x0F);
+        /* B6 = 8-bit src, B7 = 16-bit src */
+        EMIT(src->reg_size == 16 ? 0xB7 : 0xB6);
+        EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    } else if (src->kind == ASMOP_MEM) {
+        uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0x0F); EMIT(0xB6);
+        if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
+            return -1;
+    } else {
+        fprintf(stderr, "forge-asm: line %d: MOVZX: unsupported operand form\n", stmt->line);
+        return -1;
+    }
     return n;
 }
 
-/* TEST reg, reg */
+/* MOVSX: movsx r32/64, r/m8/16 — sign-extend */
+static int encode_movsx(const AsmStatement *stmt,
+                         uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG) {
+        fprintf(stderr, "forge-asm: line %d: MOVSX requires reg dst\n", stmt->line);
+        return -1;
+    }
+    int W = (dst->reg_size == 64);
+    if (src->kind == ASMOP_REG) {
+        uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0x0F);
+        EMIT(src->reg_size == 16 ? 0xBF : 0xBE); /* BF=16->32/64, BE=8->32/64 */
+        EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    } else if (src->kind == ASMOP_MEM) {
+        uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0x0F); EMIT(0xBE);
+        if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
+            return -1;
+    } else {
+        fprintf(stderr, "forge-asm: line %d: MOVSX: unsupported operand form\n", stmt->line);
+        return -1;
+    }
+    return n;
+}
+
+/* TEST — reg/mem, reg or reg, imm */
 static int encode_test(const AsmStatement *stmt,
                         uint8_t *buf, int buf_size) {
     int n = 0;
     const AsmOperand *a = &stmt->operands[0];
     const AsmOperand *b = &stmt->operands[1];
-    if (a->kind != ASMOP_REG || b->kind != ASMOP_REG) {
-        fprintf(stderr, "forge-asm: line %d: TEST requires reg, reg\n", stmt->line);
-        return -1;
+    int W = (a->kind == ASMOP_REG && a->reg_size == 64);
+    if (a->kind == ASMOP_REG && b->kind == ASMOP_REG) {
+        /* TEST r/m, r: 85 /r */
+        uint8_t rex = REX(W, REGHI(b->reg_idx), 0, REGHI(a->reg_idx));
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0x85);
+        EMIT(MODRM_RR(b->reg_idx, a->reg_idx));
+        return n;
     }
-    int W = (a->reg_size == 64);
-    /* TEST r/m, r: 85 /r */
-    uint8_t rex = REX(W, REGHI(b->reg_idx), 0, REGHI(a->reg_idx));
-    if (rex != 0x40 || W) EMIT(rex);
-    EMIT(0x85);
-    EMIT(MODRM_RR(b->reg_idx, a->reg_idx));
-    return n;
+    if (a->kind == ASMOP_REG && b->kind == ASMOP_IMM) {
+        /* TEST r/m, imm: F7 /0 imm32 */
+        uint8_t rex = REX(W, 0, 0, REGHI(a->reg_idx));
+        if (rex != 0x40 || W) EMIT(rex);
+        EMIT(0xF7);
+        EMIT(0xC0 | REGLO(a->reg_idx));
+        int32_t v = (int32_t)b->imm_val;
+        EMIT(v&0xFF); EMIT((v>>8)&0xFF); EMIT((v>>16)&0xFF); EMIT((v>>24)&0xFF);
+        return n;
+    }
+    fprintf(stderr, "forge-asm: line %d: TEST requires reg,reg or reg,imm\n", stmt->line);
+    return -1;
 }
 
-/* PUSH / POP */
+/* PUSH reg or imm8/imm32 */
 static int encode_push(const AsmStatement *stmt,
                         uint8_t *buf, int buf_size) {
     int n = 0;
     const AsmOperand *op = &stmt->operands[0];
-    if (op->kind != ASMOP_REG) {
-        fprintf(stderr, "forge-asm: line %d: PUSH requires register\n", stmt->line);
-        return -1;
+    if (op->kind == ASMOP_REG) {
+        if (REGHI(op->reg_idx)) EMIT(REX(0,0,0,1));
+        EMIT(0x50 | REGLO(op->reg_idx));
+        return n;
     }
-    if (REGHI(op->reg_idx)) EMIT(REX(0,0,0,1));
-    EMIT(0x50 | REGLO(op->reg_idx));
-    return n;
+    if (op->kind == ASMOP_IMM) {
+        long v = op->imm_val;
+        if (fits_imm8(v)) {
+            EMIT(0x6A); EMIT((uint8_t)(v & 0xFF));
+        } else {
+            EMIT(0x68);
+            int32_t v32 = (int32_t)v;
+            EMIT(v32&0xFF); EMIT((v32>>8)&0xFF); EMIT((v32>>16)&0xFF); EMIT((v32>>24)&0xFF);
+        }
+        return n;
+    }
+    fprintf(stderr, "forge-asm: line %d: PUSH requires register or immediate\n", stmt->line);
+    return -1;
 }
 
 static int encode_pop(const AsmStatement *stmt,
@@ -418,20 +554,27 @@ static int encode_pop(const AsmStatement *stmt,
     return n;
 }
 
-/* CALL label or extern */
+/* CALL: label or register (call rax) */
 static int encode_call(X86EncodeCtx *ctx, const AsmStatement *stmt,
                         uint8_t *buf, int buf_size) {
     int n = 0;
     const AsmOperand *op = &stmt->operands[0];
-    if (op->kind != ASMOP_LABEL) {
-        fprintf(stderr, "forge-asm: line %d: CALL requires label\n", stmt->line);
-        return -1;
+    if (op->kind == ASMOP_LABEL) {
+        EMIT(0xE8);
+        uint32_t rel_off = ctx->section_offset + n;
+        if (emit_rel32_label(ctx, buf, &n, buf_size, op->label, rel_off) < 0)
+            return -1;
+        return n;
     }
-    EMIT(0xE8);
-    uint32_t rel_off = ctx->section_offset + n;
-    if (emit_rel32_label(ctx, buf, &n, buf_size, op->label, rel_off) < 0)
-        return -1;
-    return n;
+    if (op->kind == ASMOP_REG) {
+        /* FF /2: call r/m64 */
+        if (REGHI(op->reg_idx)) EMIT(REX(0,0,0,1));
+        EMIT(0xFF);
+        EMIT(0xD0 | REGLO(op->reg_idx));
+        return n;
+    }
+    fprintf(stderr, "forge-asm: line %d: CALL requires label or register\n", stmt->line);
+    return -1;
 }
 
 /* JMP / conditional jumps — all use near (32-bit relative) form */
@@ -518,38 +661,76 @@ static int encode_idiv(const AsmStatement *stmt,
     return n;
 }
 
-/* NEG reg */
-static int encode_neg(const AsmStatement *stmt,
-                       uint8_t *buf, int buf_size) {
+/* NEG / NOT — unary F7 group */
+static int encode_unary_f7(const AsmStatement *stmt,
+                            uint8_t *buf, int buf_size, int opext) {
     int n = 0;
     const AsmOperand *op = &stmt->operands[0];
     if (op->kind != ASMOP_REG) {
-        fprintf(stderr, "forge-asm: line %d: NEG requires register\n", stmt->line);
+        fprintf(stderr, "forge-asm: line %d: requires register\n", stmt->line);
         return -1;
     }
     int W = (op->reg_size == 64);
     uint8_t rex = REX(W, 0, 0, REGHI(op->reg_idx));
     if (rex != 0x40 || W) EMIT(rex);
     EMIT(0xF7);
-    EMIT(0xC0 | (3 << 3) | REGLO(op->reg_idx)); /* /3 */
+    EMIT(0xC0 | (opext << 3) | REGLO(op->reg_idx));
     return n;
 }
 
-/* SHL / SHR shift instructions */
+/* MUL: unsigned multiply rdx:rax = rax * src  (F7 /4) */
+static int encode_mul(const AsmStatement *stmt,
+                       uint8_t *buf, int buf_size) {
+    return encode_unary_f7(stmt, buf, buf_size, 4);
+}
+
+/* DIV: unsigned divide rdx:rax / src  (F7 /6) */
+static int encode_div(const AsmStatement *stmt,
+                       uint8_t *buf, int buf_size) {
+    return encode_unary_f7(stmt, buf, buf_size, 6);
+}
+
+/* INC / DEC — FF group */
+static int encode_incdec(const AsmStatement *stmt,
+                          uint8_t *buf, int buf_size, int opext) {
+    int n = 0;
+    const AsmOperand *op = &stmt->operands[0];
+    if (op->kind != ASMOP_REG) {
+        fprintf(stderr, "forge-asm: line %d: INC/DEC requires register\n", stmt->line);
+        return -1;
+    }
+    int W = (op->reg_size == 64);
+    uint8_t rex = REX(W, 0, 0, REGHI(op->reg_idx));
+    if (rex != 0x40 || W) EMIT(rex);
+    EMIT(0xFF);
+    EMIT(0xC0 | (opext << 3) | REGLO(op->reg_idx));
+    return n;
+}
+
+/* SHL / SHR / SAR / ROL / ROR — shift group (C1/D3) */
 static int encode_shift(const AsmStatement *stmt, uint8_t *buf, int buf_size, int opext) {
     int n = 0;
     const AsmOperand *dst = &stmt->operands[0];
     const AsmOperand *src = &stmt->operands[1];
-    if (dst->kind != ASMOP_REG || src->kind != ASMOP_IMM) {
-        fprintf(stderr, "forge-asm: line %d: shift requires reg, imm\n", stmt->line);
+    if (dst->kind != ASMOP_REG) {
+        fprintf(stderr, "forge-asm: line %d: shift requires reg dst\n", stmt->line);
         return -1;
     }
     int W = (dst->reg_size == 64);
     uint8_t rex = REX(W, 0, 0, REGHI(dst->reg_idx));
     if (rex != 0x40 || W) EMIT(rex);
-    EMIT(0xC1);
-    EMIT(0xC0 | (opext << 3) | REGLO(dst->reg_idx));
-    EMIT((uint8_t)(src->imm_val & 0xFF));
+    if (src->kind == ASMOP_IMM) {
+        EMIT(0xC1);
+        EMIT(0xC0 | (opext << 3) | REGLO(dst->reg_idx));
+        EMIT((uint8_t)(src->imm_val & 0x3F));
+    } else if (src->kind == ASMOP_REG && src->reg_idx == 1 /* cl */) {
+        /* shift by CL: D3 /opext */
+        EMIT(0xD3);
+        EMIT(0xC0 | (opext << 3) | REGLO(dst->reg_idx));
+    } else {
+        fprintf(stderr, "forge-asm: line %d: shift src must be imm or cl\n", stmt->line);
+        return -1;
+    }
     return n;
 }
 
@@ -572,13 +753,22 @@ int x86_encode(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     if (strcmp(m, "test") == 0) return encode_test(stmt, buf, buf_size);
     if (strcmp(m, "movzx")== 0) return encode_movzx(stmt, buf, buf_size);
+    if (strcmp(m, "movsx")== 0) return encode_movsx(stmt, buf, buf_size);
     if (strcmp(m, "push") == 0) return encode_push(stmt, buf, buf_size);
     if (strcmp(m, "pop")  == 0) return encode_pop(stmt, buf, buf_size);
     if (strcmp(m, "imul") == 0) return encode_imul(stmt, buf, buf_size);
     if (strcmp(m, "idiv") == 0) return encode_idiv(stmt, buf, buf_size);
-    if (strcmp(m, "neg")  == 0) return encode_neg(stmt, buf, buf_size);
+    if (strcmp(m, "mul")  == 0) return encode_mul(stmt, buf, buf_size);
+    if (strcmp(m, "div")  == 0) return encode_div(stmt, buf, buf_size);
+    if (strcmp(m, "inc")  == 0) return encode_incdec(stmt, buf, buf_size, 0);
+    if (strcmp(m, "dec")  == 0) return encode_incdec(stmt, buf, buf_size, 1);
+    if (strcmp(m, "neg")  == 0) return encode_unary_f7(stmt, buf, buf_size, 3);
+    if (strcmp(m, "not")  == 0) return encode_unary_f7(stmt, buf, buf_size, 2);
     if (strcmp(m, "shr")  == 0) return encode_shift(stmt, buf, buf_size, 5);
     if (strcmp(m, "shl")  == 0) return encode_shift(stmt, buf, buf_size, 4);
+    if (strcmp(m, "sar")  == 0) return encode_shift(stmt, buf, buf_size, 7);
+    if (strcmp(m, "rol")  == 0) return encode_shift(stmt, buf, buf_size, 0);
+    if (strcmp(m, "ror")  == 0) return encode_shift(stmt, buf, buf_size, 1);
 
     if (strcmp(m, "ret") == 0) {
         int n = 0; EMIT(0xC3); return n;

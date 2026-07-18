@@ -39,8 +39,16 @@ static const RegEntry REG_TABLE[] = {
     {"eax",0,32},{"ecx",1,32},{"edx",2,32},{"ebx",3,32},
     {"esp",4,32},{"ebp",5,32},{"esi",6,32},{"edi",7,32},
     {"r8d", 8,32},{"r9d", 9,32},{"r10d",10,32},{"r11d",11,32},
+    {"r12d",12,32},{"r13d",13,32},{"r14d",14,32},{"r15d",15,32},
+    /* 16-bit */
+    {"ax",0,16},{"cx",1,16},{"dx",2,16},{"bx",3,16},
+    {"sp",4,16},{"bp",5,16},{"si",6,16},{"di",7,16},
     /* 8-bit */
     {"al",0,8},{"cl",1,8},{"dl",2,8},{"bl",3,8},
+    {"ah",4,8},{"ch",5,8},{"dh",6,8},{"bh",7,8},
+    {"spl",4,8},{"bpl",5,8},{"sil",6,8},{"dil",7,8},
+    {"r8b",8,8},{"r9b",9,8},{"r10b",10,8},{"r11b",11,8},
+    {"r12b",12,8},{"r13b",13,8},{"r14b",14,8},{"r15b",15,8},
     {NULL,0,0}
 };
 
@@ -113,18 +121,21 @@ static void prog_push(AsmProgram *prog, AsmStatement *s) {
 /* ---- Operand parsing ---- */
 
 /* Parse a memory expression inside [...]:
- *   [rbp - 8]
- *   [rsp + 40]
- *   [rel symbol]
+ *   Forms supported:
+ *     [base]                  e.g. [rax]
+ *     [base + disp]           e.g. [rbp-8], [rsp+40]
+ *     [base + index]          e.g. [rax+rbx]
+ *     [base + index*scale]    e.g. [rax+rbx*4]
+ *     [base + index*scale ± disp]  e.g. [rbp+rcx*8-16]
+ *     [rel symbol]            RIP-relative
  */
 static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
-    /* consume '[' is done by caller */
     op->kind = ASMOP_MEM;
 
-    /* Check for [rel symbol] */
+    /* [rel symbol] */
     if (check(p, ASM_TOK_IDENT) && p->cur.text &&
         strcmp(p->cur.text, "rel") == 0) {
-        advance(p); /* consume 'rel' */
+        advance(p);
         if (!check(p, ASM_TOK_IDENT)) {
             parse_error(p, "expected symbol after 'rel'");
             return 0;
@@ -132,6 +143,8 @@ static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
         op->mem.kind   = MEMKIND_RIP_REL;
         op->mem.symbol = strdup(p->cur.text);
         op->mem.disp   = 0;
+        op->mem.index_reg = -1;
+        op->mem.scale     = 1;
         advance(p);
         if (!match_tok(p, ASM_TOK_RBRACKET)) {
             parse_error(p, "expected ']'");
@@ -140,34 +153,98 @@ static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
         return 1;
     }
 
-    /* [base_reg ± disp] */
+    /* Must start with a base register */
     if (!check(p, ASM_TOK_IDENT)) {
         parse_error(p, "expected register in memory operand");
         return 0;
     }
     int reg_size = 0;
-    int reg_idx  = asm_lookup_reg(p->cur.text, &reg_size);
-    if (reg_idx < 0) {
+    int base_idx = asm_lookup_reg(p->cur.text, &reg_size);
+    if (base_idx < 0) {
         parse_error(p, "expected register in memory operand");
         return 0;
     }
-    op->mem.kind      = MEMKIND_BASE_DISP;
-    op->mem.base_reg  = reg_idx;
+    op->mem.base_reg  = base_idx;
     op->mem.base_size = reg_size;
+    op->mem.index_reg = -1;
+    op->mem.scale     = 1;
     op->mem.disp      = 0;
     op->mem.symbol    = NULL;
     advance(p);
 
-    /* Optional displacement */
+    /* Check what follows: ']', '+', or '-' */
+    if (check(p, ASM_TOK_RBRACKET)) {
+        /* [base] only */
+        op->mem.kind = MEMKIND_BASE_ONLY;
+        advance(p);
+        return 1;
+    }
+
     if (check(p, ASM_TOK_PLUS) || check(p, ASM_TOK_MINUS)) {
         int neg = check(p, ASM_TOK_MINUS);
         advance(p);
-        if (!check(p, ASM_TOK_NUMBER)) {
-            parse_error(p, "expected number after +/- in memory operand");
+
+        if (check(p, ASM_TOK_NUMBER)) {
+            /* [base ± imm] */
+            op->mem.disp = neg ? -(p->cur.value) : p->cur.value;
+            op->mem.kind = MEMKIND_BASE_DISP;
+            advance(p);
+        } else if (check(p, ASM_TOK_IDENT)) {
+            /* Could be [base + index] or [base + index*scale] or [base + index*scale ± disp] */
+            int idx_size = 0;
+            int idx_reg  = asm_lookup_reg(p->cur.text, &idx_size);
+            if (idx_reg < 0) {
+                parse_error(p, "expected register or number after +/- in memory operand");
+                return 0;
+            }
+            op->mem.index_reg  = neg ? -1 : idx_reg; /* subtraction not valid for index */
+            op->mem.index_size = idx_size;
+            op->mem.scale      = 1;
+            advance(p);
+
+            /* Optional *scale */
+            if (check(p, ASM_TOK_STAR)) {
+                advance(p); /* consume '*' */
+                if (!check(p, ASM_TOK_NUMBER)) {
+                    parse_error(p, "expected scale factor after '*'");
+                    return 0;
+                }
+                int sc = (int)p->cur.value;
+                if (sc != 1 && sc != 2 && sc != 4 && sc != 8) {
+                    parse_error(p, "scale must be 1, 2, 4, or 8");
+                    return 0;
+                }
+                op->mem.scale = sc;
+                advance(p);
+            }
+
+            /* Optional ± disp after index[*scale] */
+            if (check(p, ASM_TOK_PLUS) || check(p, ASM_TOK_MINUS)) {
+                int dneg = check(p, ASM_TOK_MINUS);
+                advance(p);
+                if (!check(p, ASM_TOK_NUMBER)) {
+                    parse_error(p, "expected displacement after +/- in memory operand");
+                    return 0;
+                }
+                op->mem.disp = dneg ? -(p->cur.value) : p->cur.value;
+                advance(p);
+            }
+
+            /* Determine kind */
+            if (op->mem.index_reg >= 0 && (op->mem.scale > 1 || op->mem.disp != 0)) {
+                op->mem.kind = MEMKIND_SIB;
+            } else if (op->mem.index_reg >= 0) {
+                op->mem.kind = MEMKIND_SIB; /* [base+index*1+0] still needs SIB */
+            } else {
+                op->mem.kind = MEMKIND_BASE_DISP;
+            }
+        } else {
+            parse_error(p, "expected register or number after +/- in memory operand");
             return 0;
         }
-        op->mem.disp = neg ? -(p->cur.value) : p->cur.value;
-        advance(p);
+    } else {
+        /* Nothing after base before ']' — shouldn't reach here, caught above */
+        op->mem.kind = MEMKIND_BASE_ONLY;
     }
 
     if (!match_tok(p, ASM_TOK_RBRACKET)) {
@@ -390,9 +467,13 @@ static void parse_line(Parser *p) {
         return;
     }
 
-    /* db */
-    if (strcmp(kw, "db") == 0) {
-        AsmStatement *s = new_stmt(ASM_STMT_DB, line);
+    /* db / dw / dd / dq */
+    if (strcmp(kw, "db") == 0 || strcmp(kw, "dw") == 0 ||
+        strcmp(kw, "dd") == 0 || strcmp(kw, "dq") == 0) {
+        AsmStmtKind dk = (strcmp(kw,"db")==0) ? ASM_STMT_DB :
+                         (strcmp(kw,"dw")==0) ? ASM_STMT_DW :
+                         (strcmp(kw,"dd")==0) ? ASM_STMT_DD : ASM_STMT_DQ;
+        AsmStatement *s = new_stmt(dk, line);
         s->label = label;
         parse_db_values(p, s);
         prog_push(p->prog, s);
@@ -402,18 +483,26 @@ static void parse_line(Parser *p) {
         return;
     }
 
-    /* resb */
-    if (strcmp(kw, "resb") == 0) {
+    /* resb / resw / resd / resq */
+    if (strcmp(kw, "resb") == 0 || strcmp(kw, "resw") == 0 ||
+        strcmp(kw, "resd") == 0 || strcmp(kw, "resq") == 0) {
         if (!check(p, ASM_TOK_NUMBER)) {
-            parse_error(p, "expected count after 'resb'");
+            parse_error(p, "expected count after res* directive");
             free(first); free(label);
             skip_to_newline(p);
             if (check(p, ASM_TOK_NEWLINE)) advance(p);
             return;
         }
-        AsmStatement *s = new_stmt(ASM_STMT_RESB, line);
-        s->label      = label;
-        s->resb_count = p->cur.value;
+        AsmStmtKind rk = (strcmp(kw,"resb")==0) ? ASM_STMT_RESB :
+                         (strcmp(kw,"resw")==0) ? ASM_STMT_RESW :
+                         (strcmp(kw,"resd")==0) ? ASM_STMT_RESD : ASM_STMT_RESQ;
+        int esz = (strcmp(kw,"resb")==0) ? 1 :
+                  (strcmp(kw,"resw")==0) ? 2 :
+                  (strcmp(kw,"resd")==0) ? 4 : 8;
+        AsmStatement *s = new_stmt(rk, line);
+        s->label         = label;
+        s->resb_count    = p->cur.value;
+        s->res_elem_size = esz;
         advance(p);
         prog_push(p->prog, s);
         skip_to_newline(p);

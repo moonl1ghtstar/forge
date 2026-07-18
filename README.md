@@ -125,9 +125,9 @@ source (.hlx or .c)
               └─► Sema        (type check / resolve)
                     └─► IR Builder   (AST → IR instructions)
                           └─► IR Optimizer  (constant fold, dead code, etc.)
-                                └─► Codegen (IR → x86-64 NASM text, Windows x64 ABI)
+                                └─► Codegen (IR → x86-64 ASM text, Windows x64 ABI)
                                       └─► .asm
-                                            └─► nasm -f win64
+                                            └─► Forge Assembler (Internal x86 Encoder & COFF Writer)
                                                   └─► .obj  (COFF, Win64)
                                                         └─► ld + MinGW CRT
                                                               └─► .exe
@@ -144,8 +144,7 @@ that sits between semantic analysis and assembly emit. `-dump-ir` prints it.
 - Windows (x64)
 - MSYS2 / MinGW64 toolchain
   - `gcc` — builds the Forge compiler itself
-  - `nasm` — assembles `.asm` → `.obj`
-  - `ld` — links `.obj` → `.exe`
+  - `ld` — links `.obj` → `.exe` (external dependency, NASM dependency has been completely removed)
 
 ---
 
@@ -184,7 +183,7 @@ forge src.hlx -run
 forge src.hlx -asm
 forge src.hlx -asm -o out.asm
 
-# -obj: compile → .obj via nasm (stop before link)
+# -obj: compile → .obj via Forge Assembler (stop before link)
 forge src.hlx -obj
 forge src.hlx -obj -o lib.obj
 ```
@@ -233,7 +232,7 @@ forge -link src.obj mylib.obj -o program.exe
 | Flag              | Description                                          |
 |-------------------|------------------------------------------------------|
 | `-asm`            | Output `.asm` text only (debug/preview)              |
-| `-obj`            | Compile to `.obj` via nasm (stop before link)        |
+| `-obj`            | Compile to `.obj` via Forge Assembler (stop before link) |
 | `-link a.obj ...` | Link one or more `.obj` files into `.exe`            |
 | `-o <file>`       | Override output filename                             |
 | `-run`            | Build `.exe`, then execute it                        |
@@ -288,7 +287,7 @@ int main() {
 - [x] Module system (`import`, selective imports, `config.json` manifest)
 - [x] `console` built-in module (`print`, `input`, `clear`, `color`)
 - [x] `-asm` assembly preview
-- [x] `-obj` object file output
+- [x] `-obj` object file output via internal Forge Assembler
 - [x] `-link` multi-object linker
 - [x] Auto-copy modules to `forge/bin/lib/` on build
 - [x] Auto parameter type inference for Helix parameters (string vs int)
@@ -300,6 +299,6 @@ int main() {
 
 - One compiler core, many language frontends
 - One shared IR layer for all languages
-- Multiple backends (current: NASM x86-64; future: LLVM IR, direct ELF/COFF emit)
+- Multiple backends (current: Internal x86-64 Assembler / COFF Writer; future: LLVM IR, direct ELF emit)
 - Consistent, rich diagnostics across every language
 - Go frontend (separate package-aware loader)

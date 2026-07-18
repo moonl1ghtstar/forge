@@ -19,6 +19,7 @@ typedef enum {
     ASM_TOK_RBRACKET,   /* ] */
     ASM_TOK_PLUS,       /* + */
     ASM_TOK_MINUS,      /* - */
+    ASM_TOK_STAR,       /* * (scale factor in SIB addressing) */
     ASM_TOK_DOT,        /* . (start of local label) */
     ASM_TOK_NEWLINE,    /* end of logical line */
     ASM_TOK_EOF,

@@ -21,16 +21,21 @@ typedef enum {
 
 /* How a memory reference is formed */
 typedef enum {
-    MEMKIND_BASE_DISP,  /* [base_reg + disp]  e.g. [rbp-8], [rsp+40] */
-    MEMKIND_RIP_REL     /* [rel symbol]       e.g. [rel str_0]        */
+    MEMKIND_BASE_DISP,  /* [base + disp]              e.g. [rbp-8]          */
+    MEMKIND_SIB,        /* [base + index*scale + disp] e.g. [rax+rbx*4-16]  */
+    MEMKIND_BASE_ONLY,  /* [base]                      e.g. [rax]            */
+    MEMKIND_RIP_REL     /* [rel symbol]                e.g. [rel str_0]      */
 } AsmMemKind;
 
 typedef struct {
     AsmMemKind kind;
-    int        base_reg; /* register index (MEMKIND_BASE_DISP) */
-    int        base_size;/* size of base register (always 64 here) */
-    long       disp;     /* displacement (may be negative) */
-    char      *symbol;   /* symbol name (MEMKIND_RIP_REL) */
+    int        base_reg;   /* base register index (MEMKIND_BASE_DISP / SIB / BASE_ONLY) */
+    int        base_size;  /* size of base register (always 64 here) */
+    int        index_reg;  /* SIB index register index (-1 = none) */
+    int        index_size; /* size of index register */
+    int        scale;      /* SIB scale: 1, 2, 4, or 8 */
+    long       disp;       /* displacement (may be negative) */
+    char      *symbol;     /* symbol name (MEMKIND_RIP_REL) */
 } AsmMemOp;
 
 typedef struct {
@@ -53,8 +58,14 @@ typedef enum {
     ASM_STMT_GLOBAL,   /* global <sym> */
     ASM_STMT_EXTERN,   /* extern <sym> */
     ASM_STMT_LABEL,    /* <name>:  (standalone label) */
-    ASM_STMT_DB,       /* [label:] db byte, byte, ... */
-    ASM_STMT_RESB,     /* [label:] resb count */
+    ASM_STMT_DB,       /* [label:] db  byte,  ...  (1-byte data)  */
+    ASM_STMT_DW,       /* [label:] dw  word,  ...  (2-byte data)  */
+    ASM_STMT_DD,       /* [label:] dd  dword, ...  (4-byte data)  */
+    ASM_STMT_DQ,       /* [label:] dq  qword, ...  (8-byte data)  */
+    ASM_STMT_RESB,     /* [label:] resb count      (1-byte bss)   */
+    ASM_STMT_RESW,     /* [label:] resw count      (2-byte bss)   */
+    ASM_STMT_RESD,     /* [label:] resd count      (4-byte bss)   */
+    ASM_STMT_RESQ,     /* [label:] resq count      (8-byte bss)   */
     ASM_STMT_INSTR,    /* [label:] mnemonic [op1[, op2[, op3]]] */
 } AsmStmtKind;
 
@@ -87,8 +98,9 @@ typedef struct {
     int         db_count;
     int         db_cap;
 
-    /* ASM_STMT_RESB */
-    long resb_count;
+    /* ASM_STMT_RESB / RESW / RESD / RESQ */
+    long resb_count;   /* count in *elements* (multiply by element size) */
+    int  res_elem_size; /* 1/2/4/8 bytes per element */
 
     /* ASM_STMT_INSTR */
     char       *mnemonic;

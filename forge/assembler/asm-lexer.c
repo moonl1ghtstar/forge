@@ -211,6 +211,7 @@ AsmToken asm_lexer_next(AsmLexer *lex) {
     case ']': return make_tok1(ASM_TOK_RBRACKET, line, col);
     case '+': return make_tok1(ASM_TOK_PLUS,     line, col);
     case '-': return make_tok1(ASM_TOK_MINUS,    line, col);
+    case '*': return make_tok1(ASM_TOK_STAR,     line, col);
     default:
         break;
     }
@@ -238,6 +239,7 @@ const char *asm_token_type_name(AsmTokenType type) {
     case ASM_TOK_RBRACKET: return "]";
     case ASM_TOK_PLUS:     return "+";
     case ASM_TOK_MINUS:    return "-";
+    case ASM_TOK_STAR:     return "*";
     case ASM_TOK_DOT:      return ".";
     case ASM_TOK_NEWLINE:  return "newline";
     case ASM_TOK_EOF:      return "EOF";
