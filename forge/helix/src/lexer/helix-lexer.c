@@ -213,14 +213,14 @@ static Token read_ident(Lexer *lex) {
     return t;
 }
 
-/* Read an string literal enclosed in double quotes */
+/* Read a string literal enclosed in double or single quotes */
 static Token read_string(Lexer *lex) {
     int line = lex->line;
     int start_pos = lex->pos;
     int col = start_pos - lex->line_start + 1;
-    advance(lex); /* consume opening quote */
+    char quote = advance(lex); /* consume opening quote (' or ") */
     int start = lex->pos;
-    while (peek(lex) != '\0' && peek(lex) != '"') {
+    while (peek(lex) != '\0' && peek(lex) != quote) {
         if (peek(lex) == '\\')
             advance(lex); /* skip escaped char */
         advance(lex);
@@ -263,7 +263,10 @@ Token lexer_next(Lexer *lex) {
         return read_number(lex);
 
     /* String literals */
-    if (c == '"')
+    // ponytail: Single and double quoted strings are parsed identically into TOKEN_STRING.
+    // Ceiling: No character literal type or distinct single-quote escape validation.
+    // Upgrade path: If Helix introduces char type, split single quote handling to return TOKEN_CHAR.
+    if (c == '"' || c == '\'')
         return read_string(lex);
 
     /* Single-character tokens and two-character operators */

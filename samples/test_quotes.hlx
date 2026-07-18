@@ -1,0 +1,7 @@
+import console
+
+let message1 = "Hello double quotes";
+let message2 = 'Hello single quotes';
+
+console.print(message1);
+console.print(message2);
