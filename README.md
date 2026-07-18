@@ -10,27 +10,96 @@ x86-64 Windows assembly and drives NASM and `ld` to produce native `.exe` binari
 
 ### Helix (`.hlx`)
 
-A JavaScript-style syntax language built for command-line programs:
+A JavaScript-style systems programming language designed for building command-line applications and native programs.
+
+Supported features:
 
 - `function` declarations
-- Top-level statements (auto-wrapped into `main`)
-- Variables: `var`, `let`, `const`, `global`
-- Control flow: `if`, `else`, `while`, `until`, `do`, `for`, `switch`
-- Loop control: `break()`, `pass()`
-- Module imports: `import <module>`
-- Selective imports: `import <module> { func1, func2 }`
-- `extern` function declarations (FFI)
-- Struct types and field access
+- Top-level statements (automatically wrapped into `main`)
+- Variables:
+  - `var`
+  - `let`
+  - `const`
+  - `global`
+- Data types:
+  - `int`
+  - `long`
+  - `float`
+  - `bool`
+  - `str`
+  - Struct types
+- Control flow:
+  - `if`
+  - `else`
+  - `while`
+  - `until`
+  - `do`
+  - `for`
+  - `switch`
+- Loop control:
+  - `break()`
+  - `pass()`
+- Module imports:
+  - `import <module>`
+  - `import <module> { func1, func2 }`
+- External function declarations:
+  - `extern` (FFI support)
+- Struct definitions and field access
+- Native x86-64 code generation through Forge backend
+
+---
 
 ### C subset (`.c`)
 
-A minimal C frontend sharing the same AST, IR, and codegen as Helix:
+A minimal C frontend that shares the same compiler backend infrastructure as Helix.
 
+Supported features:
+
+- C-style syntax parsing
 - `int` typed variables and parameters
+- Function declarations and calls
 - Functions with up to 4 parameters
-- `if`, `while`, `for`, `break`, `continue`
+- Control flow:
+  - `if`
+  - `while`
+  - `for`
+  - `break`
+  - `continue`
 - Return statements
-- Arithmetic and comparison expressions
+- Arithmetic expressions
+- Comparison expressions
+- Shared:
+  - AST
+  - Semantic analysis
+  - IR
+  - Code generation
+
+---
+
+### Assembly (`.asm`)
+
+Forge includes a built-in x86-64 assembler.
+
+Supported features:
+
+- NASM-style assembly syntax subset
+- x86-64 instruction encoding
+- Register and memory operand parsing
+- Labels and symbols
+- Relocation handling
+- COFF `.obj` generation
+
+The same assembler engine is used for:
+
+```
+Compiler generated ASM
+        ↓
+Forge Assembler
+
+User written ASM
+        ↓
+Forge Assembler
+```
 
 ---
 
