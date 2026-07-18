@@ -1,8 +1,8 @@
 # Forge Compiler
 
 Forge is a multi-language compiler front-end targeting Windows x64.
-It compiles `.hlx` (Helix) and `.c` (C subset) source files into
-x86-64 Windows assembly and drives NASM and `ld` to produce native `.exe` binaries.
+It compiles `.hlx` (Helix), `.c` (C subset) and `.asm` (Asm) source files into
+x86-64 Windows assembly and drives `ld` to produce native `.exe` binaries.
 
 ---
 
