@@ -6,6 +6,7 @@
 
 forge/bin/
 tools/cpp/build/
+docs/superpowers/
 
 # Except test .hlx source files
 !forge/helix/tests/*.hlx

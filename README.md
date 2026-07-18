@@ -39,13 +39,29 @@ A minimal C frontend sharing the same AST, IR, and codegen as Helix:
 ```
 forge/                        Root
   build.bat                   Builds forge.exe with gcc, then copies module/ → forge/bin/lib/
+  docs/
+    superpowers/
+      plans/                  Development plans
+      specs/                  Technical specifications
+
   module/                     Built-in module sources
     helix/
       console/                console module (print, input, clear, color)
-        config.json           Module manifest (name, version, funcs list)
         src/                  Per-function .hlx source files
+
   forge/
     main.c                    Entry point, CLI, pipeline dispatcher
+
+    assembler/                Built-in x86-64 assembler
+      docs/                   Assembler documentation
+      src/
+        lexer/                ASM lexer
+        parser/               ASM parser and operand analysis
+        x86-encode/           x86-64 instruction encoder
+        coff-writer/          COFF object file generator
+        forge-asm/            Assembler frontend and integration
+      test/                   Assembler test programs
+
     helix/
       src/
         lexer/                Helix lexer
@@ -57,14 +73,42 @@ forge/                        Root
         errors/               Structured error reporting (colored, aligned)
       test/                   Manual test programs (.hlx)
       docs/                   Grammar reference
+
     c/
       src/
         lexer/                C lexer
         parser/               C parser
         frontend/             C frontend (parse → sema → codegen)
+      test/                   Manual test programs (.c)
+      docs/                   C frontend documentation
+
     bin/
       bin/                    forge.exe, fg.exe, 4g.exe
       lib/                    Module files (copied here by build.bat)
+        console/
+          src/
+        helix/
+          console/
+            src/
+      share/
+        examples/             Example projects
+        templates/            Project templates
+
+    idea/                     Experimental ideas and prototypes
+
+  samples/                    Sample Forge programs
+
+  temp/                       Temporary build files
+
+  tools/
+    assets/                   Tool resources
+    cpp/                      C++ utilities and experiments
+      build/                  C++ build output
+      include/                C++ headers
+      src/                    C++ source files
+      tests/                  C++ tests
+    scripts/                  Development scripts
+```
 ```
 
 ---
