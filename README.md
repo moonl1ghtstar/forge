@@ -40,9 +40,6 @@ A minimal C frontend sharing the same AST, IR, and codegen as Helix:
 forge/                        Root
   build.bat                   Builds forge.exe with gcc, then copies module/ → forge/bin/lib/
   docs/
-    superpowers/
-      plans/                  Development plans
-      specs/                  Technical specifications
 
   module/                     Built-in module sources
     helix/
