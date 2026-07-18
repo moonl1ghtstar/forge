@@ -45,6 +45,7 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     -I"%SRC%\ir" ^
     -I"%SRC%\codegen" ^
     -I"%SRC%\errors" ^
+    -I"%ROOT%forge\assembler" ^
     -I"%CSRC%" ^
     -I"%CSRC%\lexer" ^
     -I"%CSRC%\parser" ^
@@ -58,6 +59,11 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     "%SRC%\ir\builder\ir-builder.c" ^
     "%SRC%\ir\opt\ir-opt.c" ^
     "%SRC%\codegen\helix-codegen.c" ^
+    "%ROOT%forge\assembler\asm-lexer.c" ^
+    "%ROOT%forge\assembler\asm-parser.c" ^
+    "%ROOT%forge\assembler\x86-encode.c" ^
+    "%ROOT%forge\assembler\coff-writer.c" ^
+    "%ROOT%forge\assembler\forge-asm.c" ^
     "%SRC%\errors\forge-errors.c" ^
     "%CSRC%\lexer\c-lexer.c" ^
     "%CSRC%\parser\c-parser.c" ^

@@ -57,6 +57,7 @@
 /* C frontend headers */
 #include "c-frontend.h"
 #include "c-lexer.h"
+#include "assembler/forge-asm.h"
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetShortPathNameA(const char *lpszLongPath, char *lpszShortPath, unsigned long cchBuffer);
@@ -74,10 +75,10 @@ __declspec(dllimport) unsigned long __stdcall GetCurrentDirectoryA(unsigned long
 /* ---- Usage / error helpers ---- */
 
 static void usage(const char *progname, int exit_code) {
-    fprintf(stderr, "Usage: %s <source.hlx|source.c> [options]\n", progname);
+    fprintf(stderr, "Usage: %s <source.hlx|source.c|source.asm> [options]\n", progname);
     fprintf(stderr, "\nOutput mode (mutually exclusive):\n");
     fprintf(stderr, "  -asm          Output .asm only (debug/preview, default ext: .asm)\n");
-    fprintf(stderr, "  -obj          Compile to .obj via nasm (stop before link)\n");
+    fprintf(stderr, "  -obj          Compile to .obj via Forge Assembler (stop before link)\n");
     fprintf(stderr, "  (default)     Compile + link to .exe\n");
     fprintf(stderr, "\nOther options:\n");
     fprintf(stderr, "  -o <file>     Output filename\n");
@@ -87,7 +88,7 @@ static void usage(const char *progname, int exit_code) {
     fprintf(stderr, "  -dump-tokens  Print lexer tokens and exit\n");
     fprintf(stderr, "  -dump-ast     Print parsed AST and exit\n");
     fprintf(stderr, "  -dump-ir      Print lowered IR and exit\n");
-    fprintf(stderr, "\nPipeline:  source -> forge -> .asm -> nasm -f win64 -> .obj -> ld -> .exe\n");
+    fprintf(stderr, "\nPipeline:  source -> forge -> .asm -> forge assembler -> .obj -> ld -> .exe\n");
     fprintf(stderr, "Cross-obj: forge src.hlx -obj && gcc -c lib.c -o lib.obj && "
                     "forge -link src.obj lib.obj -o out.exe\n");
     exit(exit_code);
@@ -646,14 +647,9 @@ static int dump_ast_source(const char *source_path) {
  *   linked together with any other COFF .obj (Forge or C-produced).
  */
 static int assemble_object(const char *asm_path, const char *obj_path) {
-    char *asm_short = short_path_dup(asm_path);
-    char *obj_short = short_path_dup(obj_path);
-    const char *const nasm_argv[] = {"nasm", "-f", "win64", asm_short, "-o", obj_short, NULL};
-    int rc = run_process("nasm", nasm_argv);
-    free(asm_short);
-    free(obj_short);
+    int rc = forge_assemble_file(asm_path, obj_path);
     if (rc != 0)
-        fprintf(stderr, "Forge: nasm assembly failed for '%s'\n", asm_path);
+        fprintf(stderr, "Forge: assembly failed for '%s'\n", asm_path);
     return rc;
 }
 
@@ -927,11 +923,17 @@ int main(int argc, char *argv[]) {
             default_output = replace_extension(source_path, ".asm");
             output_path = default_output;
         }
-        result = compile_source_to_asm(source_path, output_path, 0);
+        const char *dot = strrchr(source_path, '.');
+        if (dot && strcmp(dot, ".asm") == 0) {
+            /* Input is already assembly; copy it */
+            result = copy_file_bytes(source_path, output_path);
+        } else {
+            result = compile_source_to_asm(source_path, output_path, 0);
+        }
         goto cleanup;
     }
 
-    /* ---- -obj mode: .asm → nasm → .obj (stop before link) ---- */
+    /* ---- -obj mode: compile/assemble to .obj (stop before link) ---- */
     if (obj_only) {
         if (!output_path) {
             default_output = replace_extension(source_path, ".obj");
@@ -953,11 +955,16 @@ int main(int argc, char *argv[]) {
             work_drive_mapped = 1;
         }
 
-        result = compile_source_to_asm(source_path, work_asm_path, 1);
-        if (result != 0)
-            goto cleanup;
+        const char *dot = strrchr(source_path, '.');
+        if (dot && strcmp(dot, ".asm") == 0) {
+            result = assemble_object(source_path, work_obj_path);
+        } else {
+            result = compile_source_to_asm(source_path, work_asm_path, 1);
+            if (result != 0)
+                goto cleanup;
 
-        result = assemble_object(work_asm_path, work_obj_path);
+            result = assemble_object(work_asm_path, work_obj_path);
+        }
         if (result != 0)
             goto cleanup;
 
@@ -991,11 +998,16 @@ int main(int argc, char *argv[]) {
         work_drive_mapped = 1;
     }
 
-    result = compile_source_to_asm(source_path, work_asm_path, 0);
-    if (result != 0)
-        goto cleanup;
+    const char *dot = strrchr(source_path, '.');
+    if (dot && strcmp(dot, ".asm") == 0) {
+        result = assemble_object(source_path, work_obj_path);
+    } else {
+        result = compile_source_to_asm(source_path, work_asm_path, 0);
+        if (result != 0)
+            goto cleanup;
 
-    result = assemble_object(work_asm_path, work_obj_path);
+        result = assemble_object(work_asm_path, work_obj_path);
+    }
     if (result != 0)
         goto cleanup;
 
