@@ -1,0 +1,12 @@
+import console
+
+let a = 100;
+let b = 20;
+
+let sum = a + b;
+let diff = a - b;
+let prod = a * b;
+
+console.print(sum);
+console.print(diff);
+console.print(prod);

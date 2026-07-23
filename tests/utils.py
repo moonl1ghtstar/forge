@@ -31,13 +31,12 @@ def locate_forge() -> str:
             return str(abs_c)
             
     # PATH lookup
-    try:
-        cmd = ["forge", "--help"] if sys.platform != "win32" else ["forge.exe", "--help"]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if res.returncode == 0:
-            return "forge"
-    except FileNotFoundError:
-        pass
+    forge_name = "forge.exe" if sys.platform == "win32" else "forge"
+    path_lookup = shutil.which(forge_name)
+    if path_lookup:
+        abs_lookup = Path(path_lookup).resolve().absolute()
+        if abs_lookup.exists() and abs_lookup.is_file():
+            return str(abs_lookup)
         
     print("Forge error: forge executable not found", file=sys.stderr)
     sys.exit(1)
@@ -105,3 +104,24 @@ def assert_output_contains(output: str, substring: str):
 def assert_return_code(actual: int, expected: int):
     if actual != expected:
         raise AssertionError(f"Return code mismatch: expected {expected}, got {actual}")
+
+def cleanup_test_files(paths):
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+            except OSError:
+                pass
+
+def assert_output(actual: str, expected: str):
+    actual_norm = actual.replace("\r\n", "\n").strip()
+    expected_norm = expected.replace("\r\n", "\n").strip()
+    if actual_norm != expected_norm:
+        raise AssertionError(
+            f"Output mismatch.\n"
+            f"Expected: {repr(expected_norm)}\n"
+            f"Actual:   {repr(actual_norm)}"
+        )
