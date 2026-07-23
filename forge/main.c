@@ -43,6 +43,14 @@
 #include <errno.h>
 #include <string.h>
 #include <process.h>
+#include <io.h>
+#include <signal.h>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #include "errors/forge-errors.h"
 
@@ -57,20 +65,35 @@
 /* C frontend headers */
 #include "c-frontend.h"
 #include "c-lexer.h"
-#include "assembler/forge-asm.h"
+#include "assembler/src/forge-asm/forge-asm.h"
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetShortPathNameA(const char *lpszLongPath, char *lpszShortPath, unsigned long cchBuffer);
 __declspec(dllimport) unsigned long __stdcall GetCurrentDirectoryA(unsigned long nBufferLength, char *lpBuffer);
+__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
+__declspec(dllimport) unsigned long __stdcall GetTempPathA(unsigned long nBufferLength, char *lpBuffer);
+__declspec(dllimport) int __stdcall CreateDirectoryA(const char *lpPathName, void *lpSecurityAttributes);
+__declspec(dllimport) int __stdcall RemoveDirectoryA(const char *lpPathName);
+__declspec(dllimport) unsigned long __stdcall GetLastError(void);
 #endif
 
-/* ---- Toolchain paths ---- */
-#define MINGW_LIB_DIR "C:/msys64/mingw64/lib"
-#define GCC_LIB_DIR "C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0"
-#define CRT2_OBJ "C:/msys64/mingw64/lib/crt2.o"
+typedef struct {
+    char temp_dir[1024];
+    char asm_path[1024];
+    char obj_path[1024];
+    char exe_path[1024];
+    int verbose;
+} BuildContext;
+
+static BuildContext g_build_ctx;
 
 /* Maximum number of extra .obj files that can be passed via -link */
 #define MAX_LINK_OBJS 64
+
+typedef struct {
+    char **items;
+    int count;
+} PathList;
 
 /* ---- Usage / error helpers ---- */
 
@@ -170,24 +193,54 @@ static char *replace_extension(const char *path, const char *new_ext) {
     if (dot)
         *dot = '\0';
 
-    need = strlen(copy) + strlen(new_ext) + 1;
+    size_t orig_len = strlen(copy);
+    need = orig_len + strlen(new_ext) + 1;
     out = (char *)realloc(copy, need);
     if (!out) {
         free(copy);
         return NULL;
     }
     copy = out;
-    strcat(copy, new_ext);
+    int res = snprintf(copy + orig_len, need - orig_len, "%s", new_ext);
+    if (res < 0 || res >= (int)(need - orig_len)) {
+        fprintf(stderr, "Forge error: path too long\n");
+        free(copy);
+        return NULL;
+    }
     return copy;
 }
 
 /* Return a short (8.3) path on Windows to avoid NASM path issues */
 static char *short_path_dup(const char *path) {
 #ifdef _WIN32
-    char buf[1024];
+    char buf[2048];
     unsigned long n = GetShortPathNameA(path, buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf))
         return strdup(buf);
+        
+    /* If failed (e.g. file does not exist yet), try getting short path of parent directory */
+    char dir[1024];
+    int res = snprintf(dir, sizeof(dir), "%s", path);
+    if (res < 0 || res >= (int)sizeof(dir)) {
+        fprintf(stderr, "Forge error: path too long\n");
+        return NULL;
+    }
+    char *last_slash = strrchr(dir, '\\');
+    if (!last_slash)
+        last_slash = strrchr(dir, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        char short_dir[1024];
+        n = GetShortPathNameA(dir, short_dir, sizeof(short_dir));
+        if (n > 0 && n < sizeof(short_dir)) {
+            int write_res = snprintf(buf, sizeof(buf), "%s\\%s", short_dir, last_slash + 1);
+            if (write_res < 0 || write_res >= (int)sizeof(buf)) {
+                fprintf(stderr, "Forge error: path too long\n");
+                return NULL;
+            }
+            return strdup(buf);
+        }
+    }
 #endif
     return strdup(path);
 }
@@ -203,16 +256,39 @@ static int run_process(const char *file, const char *const argv[]) {
     return (int)rc;
 }
 
-/* ---- Drive mapping (for short-path linker invocation) ---- */
+/* ---- Path validation and safe deletion ---- */
 
-static int map_work_drive(const char *dir) {
-    const char *const argv[] = {"cmd", "/c", "subst", "X:", dir, NULL};
-    return run_process("cmd", argv);
+static int is_absolute_path(const char *path) {
+    if (!path || path[0] == '\0')
+        return 0;
+#ifdef _WIN32
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+        path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+        return 1;
+    }
+    if ((path[0] == '\\' && path[1] == '\\') || (path[0] == '/' && path[1] == '/')) {
+        return 1;
+    }
+    return 0;
+#else
+    return path[0] == '/';
+#endif
 }
 
-static void unmap_work_drive(void) {
-    const char *const argv[] = {"cmd", "/c", "subst", "X:", "/d", NULL};
-    run_process("cmd", argv);
+static void safe_remove(const char *path, int verbose) {
+    if (path && path[0] != '\0') {
+        if (remove(path) != 0) {
+            if (errno != ENOENT) {
+                if (verbose) {
+                    fprintf(stderr, "[Forge] debug: failed to delete temporary file '%s': %s\n", path, strerror(errno));
+                }
+            }
+        } else {
+            if (verbose) {
+                fprintf(stderr, "[Forge] deleted temp file: %s\n", path);
+            }
+        }
+    }
 }
 
 /* ---- AST dump helpers ---- */
@@ -555,7 +631,6 @@ static int compile_helix(const char *source_path, const char *asm_path) {
     codegen_emit(ir, out);
     fclose(out);
 
-
     ir_program_free(ir);
     ast_free(program);
     return 0;
@@ -649,8 +724,93 @@ static int dump_ast_source(const char *source_path) {
 static int assemble_object(const char *asm_path, const char *obj_path) {
     int rc = forge_assemble_file(asm_path, obj_path);
     if (rc != 0)
-        fprintf(stderr, "Forge: assembly failed for '%s'\n", asm_path);
+        fprintf(stderr, "Forge error: assembly failed for '%s'\n", asm_path);
     return rc;
+}
+
+static void path_list_add(PathList *list, const char *path) {
+    list->items = (char **)realloc(list->items, sizeof(char *) * (list->count + 1));
+    list->items[list->count++] = strdup(path);
+}
+
+static void path_list_free(PathList *list) {
+    int i;
+    for (i = 0; i < list->count; i++)
+        free(list->items[i]);
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+}
+
+static char *module_lib_root_dup(void) {
+    char exe_path[1024];
+    char *last_slash;
+    char *root;
+
+    if (GetModuleFileNameA(NULL, exe_path, sizeof(exe_path)) == 0)
+        return NULL;
+
+    last_slash = strrchr(exe_path, '\\');
+    if (!last_slash)
+        last_slash = strrchr(exe_path, '/');
+    if (!last_slash)
+        return NULL;
+
+    *last_slash = '\0';
+
+    size_t root_len = strlen(exe_path) + strlen("\\..\\lib") + 1;
+    root = (char *)malloc(root_len);
+    if (!root)
+        return NULL;
+    int res = snprintf(root, root_len, "%s\\..\\lib", exe_path);
+    if (res < 0 || res >= (int)root_len) {
+        fprintf(stderr, "Forge error: path too long\n");
+        free(root);
+        return NULL;
+    }
+    return root;
+}
+
+static void collect_module_libs(PathList *libs) {
+    char *root = module_lib_root_dup();
+    char pattern[1024];
+    struct _finddata_t dir_data;
+    intptr_t dir_handle;
+
+    if (!root)
+        return;
+
+    snprintf(pattern, sizeof(pattern), "%s\\*", root);
+    dir_handle = _findfirst(pattern, &dir_data);
+    if (dir_handle == -1) {
+        free(root);
+        return;
+    }
+
+    do {
+        char lib_pattern[1024];
+        struct _finddata_t lib_data;
+        intptr_t lib_handle;
+
+        if (!(dir_data.attrib & _A_SUBDIR))
+            continue;
+        if (strcmp(dir_data.name, ".") == 0 || strcmp(dir_data.name, "..") == 0)
+            continue;
+
+        snprintf(lib_pattern, sizeof(lib_pattern), "%s\\%s\\*.lib", root, dir_data.name);
+        lib_handle = _findfirst(lib_pattern, &lib_data);
+        if (lib_handle == -1)
+            continue;
+        do {
+            char lib_path[1024];
+            snprintf(lib_path, sizeof(lib_path), "%s\\%s\\%s", root, dir_data.name, lib_data.name);
+            path_list_add(libs, lib_path);
+        } while (_findnext(lib_handle, &lib_data) == 0);
+        _findclose(lib_handle);
+    } while (_findnext(dir_handle, &dir_data) == 0);
+
+    _findclose(dir_handle);
+    free(root);
 }
 
 /* ---- Backend: link one or more .obj → .exe ---- */
@@ -674,60 +834,93 @@ static int assemble_object(const char *asm_path, const char *obj_path) {
  *     - Forge functions already respect this (see helix-codegen.c prologue).
  */
 static int link_executable(const char **obj_paths, int obj_count, const char *out_path) {
-    /*
-     * Build ld argv dynamically.
-     * Fixed slots: "ld", "-o", out_short, CRT2_OBJ, [objs...],
-     *              "-L", MINGW_LIB_DIR, "-L", GCC_LIB_DIR,
-     *              "-lmingw32", "-lmsvcrt", "-lkernel32", "-lmingwex", "-lgcc",
-     *              "-e", "mainCRTStartup", "-subsystem", "console", NULL
-     * = 3 + 1 + obj_count + 2 + 5 + 2 + 2 + 1 = 16 + obj_count
-     */
     int i;
     int argc = 0;
-    const char **ld_argv;
+    const char **gcc_argv;
     char *out_short;
     char **obj_shorts;
+    PathList module_libs = {0};
+    char **lib_shorts;
     int rc;
 
+    collect_module_libs(&module_libs);
     out_short = short_path_dup(out_path);
     obj_shorts = (char **)malloc(sizeof(char *) * obj_count);
     for (i = 0; i < obj_count; i++)
         obj_shorts[i] = short_path_dup(obj_paths[i]);
+    lib_shorts = (char **)malloc(sizeof(char *) * module_libs.count);
+    for (i = 0; i < module_libs.count; i++)
+        lib_shorts[i] = short_path_dup(module_libs.items[i]);
 
-    ld_argv = (const char **)malloc(sizeof(const char *) * (20 + obj_count));
-
-    ld_argv[argc++] = "ld";
-    ld_argv[argc++] = "-o";
-    ld_argv[argc++] = out_short;
-    ld_argv[argc++] = CRT2_OBJ;
+    gcc_argv = (const char **)malloc(sizeof(const char *) * (8 + obj_count + module_libs.count));
+    gcc_argv[argc++] = "gcc";
+    gcc_argv[argc++] = "-o";
+    gcc_argv[argc++] = out_short;
     for (i = 0; i < obj_count; i++)
-        ld_argv[argc++] = obj_shorts[i];
-    ld_argv[argc++] = "-L";
-    ld_argv[argc++] = MINGW_LIB_DIR;
-    ld_argv[argc++] = "-L";
-    ld_argv[argc++] = GCC_LIB_DIR;
-    ld_argv[argc++] = "-lmingw32";
-    ld_argv[argc++] = "-lmsvcrt";
-    ld_argv[argc++] = "-lkernel32";
-    ld_argv[argc++] = "-lmingwex";
-    ld_argv[argc++] = "-lgcc";
-    ld_argv[argc++] = "-e";
-    ld_argv[argc++] = "mainCRTStartup";
-    ld_argv[argc++] = "-subsystem";
-    ld_argv[argc++] = "console";
-    ld_argv[argc++] = NULL;
+        gcc_argv[argc++] = obj_shorts[i];
+    for (i = 0; i < module_libs.count; i++)
+        gcc_argv[argc++] = lib_shorts[i];
+    gcc_argv[argc++] = "-lmsvcrt";
+    gcc_argv[argc++] = "-lkernel32";
+    gcc_argv[argc++] = NULL;
 
-    rc = run_process("ld", ld_argv);
+    rc = run_process("gcc", gcc_argv);
 
-    free(ld_argv);
+    free(gcc_argv);
     for (i = 0; i < obj_count; i++)
         free(obj_shorts[i]);
     free(obj_shorts);
+    for (i = 0; i < module_libs.count; i++)
+        free(lib_shorts[i]);
+    free(lib_shorts);
+    path_list_free(&module_libs);
     free(out_short);
 
     if (rc != 0)
-        fprintf(stderr, "Forge: linking failed\n");
+        fprintf(stderr, "Forge error: linking failed\n");
     return rc;
+}
+
+static void perform_cleanup(void) {
+    if (g_build_ctx.asm_path[0] != '\0') {
+        safe_remove(g_build_ctx.asm_path, g_build_ctx.verbose);
+        g_build_ctx.asm_path[0] = '\0';
+    }
+    if (g_build_ctx.obj_path[0] != '\0') {
+        safe_remove(g_build_ctx.obj_path, g_build_ctx.verbose);
+        g_build_ctx.obj_path[0] = '\0';
+    }
+    if (g_build_ctx.exe_path[0] != '\0') {
+        safe_remove(g_build_ctx.exe_path, g_build_ctx.verbose);
+        g_build_ctx.exe_path[0] = '\0';
+    }
+    if (g_build_ctx.temp_dir[0] != '\0') {
+#ifdef _WIN32
+        if (RemoveDirectoryA(g_build_ctx.temp_dir) != 0) {
+            if (g_build_ctx.verbose) {
+                fprintf(stderr, "[Forge] removed temp directory: %s\n", g_build_ctx.temp_dir);
+            }
+            g_build_ctx.temp_dir[0] = '\0';
+        } else {
+            unsigned long err = GetLastError();
+            if (err != 2 && err != 3) {
+                if (g_build_ctx.verbose) {
+                    fprintf(stderr, "[Forge] debug: failed to remove temp directory '%s' (Error %lu)\n", g_build_ctx.temp_dir, err);
+                }
+            }
+        }
+#else
+        if (rmdir(g_build_ctx.temp_dir) == 0) {
+            g_build_ctx.temp_dir[0] = '\0';
+        }
+#endif
+    }
+}
+
+static void handle_signal(int sig) {
+    (void)sig;
+    perform_cleanup();
+    exit(1);
 }
 
 /* ---- main ---- */
@@ -742,6 +935,7 @@ int main(int argc, char *argv[]) {
     int dump_tokens = 0;
     int dump_ast = 0;
     int dump_ir = 0;
+    int verbose = 0;
     int i;
 
     /* Extra .obj files supplied via -link */
@@ -749,13 +943,101 @@ int main(int argc, char *argv[]) {
     int link_obj_count = 0;
 
     char *default_output = NULL;
-    int work_drive_mapped = 0;
     int result = 0;
 
-    /* Temporary work paths on X: (short, no spaces) */
-    const char *work_asm_path = "X:\\forge-build.asm";
-    const char *work_obj_path = "X:\\forge-build.o";
-    const char *work_exe_path = "X:\\forge-build.exe";
+    memset(&g_build_ctx, 0, sizeof(g_build_ctx));
+    atexit(perform_cleanup);
+    signal(SIGINT, handle_signal);
+
+    /* Pre-scan for -verbose flag */
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-verbose") == 0) {
+            verbose = 1;
+            break;
+        }
+    }
+
+    g_build_ctx.verbose = verbose;
+
+#ifdef _WIN32
+    {
+        char temp_base[1024];
+        unsigned long len = GetTempPathA(sizeof(temp_base), temp_base);
+        if (len == 0 || len >= sizeof(temp_base)) {
+            fprintf(stderr, "Forge error: temporary path is too long or unavailable\n");
+            return 1;
+        }
+        if (temp_base[len - 1] == '\\') {
+            temp_base[len - 1] = '\0';
+            len--;
+        }
+        
+        char base_work_dir[1024];
+        int res = snprintf(base_work_dir, sizeof(base_work_dir), "%s\\forge-work", temp_base);
+        if (res < 0 || res >= (int)sizeof(base_work_dir)) {
+            fprintf(stderr, "Forge error: path too long\n");
+            return 1;
+        }
+        
+        if (!CreateDirectoryA(base_work_dir, NULL)) {
+            unsigned long err = GetLastError();
+            if (err != 183) { /* 183 is ERROR_ALREADY_EXISTS */
+                fprintf(stderr, "Forge error: failed to create temporary work directory '%s' (Error %lu)\n", base_work_dir, err);
+                return 1;
+            }
+        }
+        
+        int pid = _getpid();
+        res = snprintf(g_build_ctx.temp_dir, sizeof(g_build_ctx.temp_dir), "%s\\%d", base_work_dir, pid);
+        if (res < 0 || res >= (int)sizeof(g_build_ctx.temp_dir)) {
+            fprintf(stderr, "Forge error: path too long\n");
+            return 1;
+        }
+        
+        if (verbose) {
+            fprintf(stderr, "[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
+        }
+        
+        if (!CreateDirectoryA(g_build_ctx.temp_dir, NULL)) {
+            unsigned long err = GetLastError();
+            if (err != 183) { /* 183 is ERROR_ALREADY_EXISTS */
+                fprintf(stderr, "Forge error: failed to create temporary work directory '%s' (Error %lu)\n", g_build_ctx.temp_dir, err);
+                return 1;
+            }
+        }
+        
+        int res1 = snprintf(g_build_ctx.asm_path, sizeof(g_build_ctx.asm_path), "%s\\forge-build.asm", g_build_ctx.temp_dir);
+        int res2 = snprintf(g_build_ctx.obj_path, sizeof(g_build_ctx.obj_path), "%s\\forge-build.o", g_build_ctx.temp_dir);
+        int res3 = snprintf(g_build_ctx.exe_path, sizeof(g_build_ctx.exe_path), "%s\\forge-build.exe", g_build_ctx.temp_dir);
+        if (res1 < 0 || res1 >= (int)sizeof(g_build_ctx.asm_path) ||
+            res2 < 0 || res2 >= (int)sizeof(g_build_ctx.obj_path) ||
+            res3 < 0 || res3 >= (int)sizeof(g_build_ctx.exe_path)) {
+            fprintf(stderr, "Forge error: temporary path is too long\n");
+            return 1;
+        }
+    }
+#else
+    int pid = getpid();
+    int res = snprintf(g_build_ctx.temp_dir, sizeof(g_build_ctx.temp_dir), "/tmp/forge-work/%d", pid);
+    if (res < 0 || res >= (int)sizeof(g_build_ctx.temp_dir)) {
+        fprintf(stderr, "Forge error: path too long\n");
+        return 1;
+    }
+    mkdir("/tmp/forge-work", 0777);
+    mkdir(g_build_ctx.temp_dir, 0777);
+    int res1 = snprintf(g_build_ctx.asm_path, sizeof(g_build_ctx.asm_path), "%s/forge-build.asm", g_build_ctx.temp_dir);
+    int res2 = snprintf(g_build_ctx.obj_path, sizeof(g_build_ctx.obj_path), "%s/forge-build.o", g_build_ctx.temp_dir);
+    int res3 = snprintf(g_build_ctx.exe_path, sizeof(g_build_ctx.exe_path), "%s/forge-build.exe", g_build_ctx.temp_dir);
+    if (res1 < 0 || res1 >= (int)sizeof(g_build_ctx.asm_path) ||
+        res2 < 0 || res2 >= (int)sizeof(g_build_ctx.obj_path) ||
+        res3 < 0 || res3 >= (int)sizeof(g_build_ctx.exe_path)) {
+        fprintf(stderr, "Forge error: temporary path is too long\n");
+        return 1;
+    }
+    if (verbose) {
+        fprintf(stderr, "[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
+    }
+#endif
 
     if (argc < 2) {
         cli_error(argv[0], "no input file provided");
@@ -799,6 +1081,8 @@ int main(int argc, char *argv[]) {
                 output_path = argv[++i];
             } else if (strcmp(argv[i], "-run") == 0) {
                 do_run = 1;
+            } else if (strcmp(argv[i], "-verbose") == 0) {
+                /* already handled */
             } else {
                 fprintf(stderr, "Forge error: unexpected argument '%s' in -link mode\n", argv[i]);
                 return 1;
@@ -816,31 +1100,34 @@ int main(int argc, char *argv[]) {
             output_path = default_output;
         }
 
-        {
-            char cwd[1024];
-            if (!GetCurrentDirectoryA(sizeof(cwd), cwd)) {
-                fprintf(stderr, "Forge error: cannot read current directory\n");
-                result = 1;
-                goto cleanup;
-            }
-            if (map_work_drive(cwd) != 0) {
-                fprintf(stderr, "Forge error: failed to map work drive for linker tools\n");
-                result = 1;
-                goto cleanup;
-            }
-            work_drive_mapped = 1;
-        }
-
-        result = link_executable(link_objs, link_obj_count, work_exe_path);
-        if (result != 0)
-            goto cleanup;
-
-        if (copy_file_bytes(work_exe_path, output_path) != 0) {
-            fprintf(stderr, "Forge: failed to write '%s'\n", output_path);
+        if (!is_absolute_path(g_build_ctx.exe_path)) {
+            fprintf(stderr, "Forge error: temporary path '%s' is not absolute\n", g_build_ctx.exe_path);
             result = 1;
             goto cleanup;
         }
 
+        if (verbose) {
+            fprintf(stderr, "[Forge] linking:\n");
+            for (i = 0; i < link_obj_count; i++) {
+                fprintf(stderr, "  %s\n", link_objs[i]);
+            }
+            fprintf(stderr, "\n");
+        }
+
+        result = link_executable(link_objs, link_obj_count, g_build_ctx.exe_path);
+        if (result != 0)
+            goto cleanup;
+
+        fprintf(stderr,
+            "[Forge debug] copy source='%s' destination='%s'\n",
+            g_build_ctx.exe_path ? g_build_ctx.exe_path : "(null)",
+            output_path ? output_path : "(null)"
+        );
+        if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
+            fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
+            result = 1;
+            goto cleanup;
+        }
 
         if (do_run) {
             char *run_short = short_path_dup(output_path);
@@ -868,6 +1155,8 @@ int main(int argc, char *argv[]) {
             dump_ast = 1;
         } else if (strcmp(argv[i], "-dump-ir") == 0) {
             dump_ir = 1;
+        } else if (strcmp(argv[i], "-verbose") == 0) {
+            /* already handled */
         } else {
             fprintf(stderr, "Forge error: unexpected argument '%s'\n", argv[i]);
             fprintf(stderr, "Try: %s --help\n", argv[0]);
@@ -926,6 +1215,11 @@ int main(int argc, char *argv[]) {
         const char *dot = strrchr(source_path, '.');
         if (dot && strcmp(dot, ".asm") == 0) {
             /* Input is already assembly; copy it */
+            fprintf(stderr,
+                "[Forge debug] copy source='%s' destination='%s'\n",
+                source_path ? source_path : "(null)",
+                output_path ? output_path : "(null)"
+            );
             result = copy_file_bytes(source_path, output_path);
         } else {
             result = compile_source_to_asm(source_path, output_path, 0);
@@ -940,36 +1234,55 @@ int main(int argc, char *argv[]) {
             output_path = default_output;
         }
 
-        {
-            char cwd[1024];
-            if (!GetCurrentDirectoryA(sizeof(cwd), cwd)) {
-                fprintf(stderr, "Forge error: cannot read current directory\n");
-                result = 1;
-                goto cleanup;
-            }
-            if (map_work_drive(cwd) != 0) {
-                fprintf(stderr, "Forge error: failed to map work drive for linker tools\n");
-                result = 1;
-                goto cleanup;
-            }
-            work_drive_mapped = 1;
-        }
-
         const char *dot = strrchr(source_path, '.');
         if (dot && strcmp(dot, ".asm") == 0) {
-            result = assemble_object(source_path, work_obj_path);
+            if (!is_absolute_path(g_build_ctx.obj_path)) {
+                fprintf(stderr, "Forge error: temporary path '%s' is not absolute\n", g_build_ctx.obj_path);
+                result = 1;
+                goto cleanup;
+            }
+            if (verbose) {
+                const char *fname = strrchr(source_path, '\\');
+                if (!fname) fname = strrchr(source_path, '/');
+                if (fname) fname++;
+                else fname = source_path;
+                fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+            }
+            result = assemble_object(source_path, g_build_ctx.obj_path);
         } else {
-            result = compile_source_to_asm(source_path, work_asm_path, 1);
+            if (!is_absolute_path(g_build_ctx.asm_path)) {
+                fprintf(stderr, "Forge error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
+                result = 1;
+                goto cleanup;
+            }
+            result = compile_source_to_asm(source_path, g_build_ctx.asm_path, 1);
             if (result != 0)
                 goto cleanup;
 
-            result = assemble_object(work_asm_path, work_obj_path);
+            if (!is_absolute_path(g_build_ctx.asm_path) || !is_absolute_path(g_build_ctx.obj_path)) {
+                fprintf(stderr, "Forge error: temporary path is not absolute\n");
+                result = 1;
+                goto cleanup;
+            }
+            if (verbose) {
+                const char *fname = strrchr(g_build_ctx.asm_path, '\\');
+                if (!fname) fname = strrchr(g_build_ctx.asm_path, '/');
+                if (fname) fname++;
+                else fname = g_build_ctx.asm_path;
+                fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+            }
+            result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
         }
         if (result != 0)
             goto cleanup;
 
-        if (copy_file_bytes(work_obj_path, output_path) != 0) {
-            fprintf(stderr, "Forge: failed to write '%s'\n", output_path);
+        fprintf(stderr,
+            "[Forge debug] copy source='%s' destination='%s'\n",
+            g_build_ctx.obj_path ? g_build_ctx.obj_path : "(null)",
+            output_path ? output_path : "(null)"
+        );
+        if (copy_file_bytes(g_build_ctx.obj_path, output_path) != 0) {
+            fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
             result = 1;
             goto cleanup;
         }
@@ -983,48 +1296,77 @@ int main(int argc, char *argv[]) {
         output_path = default_output;
     }
 
-    {
-        char cwd[1024];
-        if (!GetCurrentDirectoryA(sizeof(cwd), cwd)) {
-            fprintf(stderr, "Forge error: cannot read current directory\n");
-            result = 1;
-            goto cleanup;
-        }
-        if (map_work_drive(cwd) != 0) {
-            fprintf(stderr, "Forge error: failed to map work drive for linker tools\n");
-            result = 1;
-            goto cleanup;
-        }
-        work_drive_mapped = 1;
-    }
-
     const char *dot = strrchr(source_path, '.');
     if (dot && strcmp(dot, ".asm") == 0) {
-        result = assemble_object(source_path, work_obj_path);
+        if (!is_absolute_path(g_build_ctx.obj_path)) {
+            fprintf(stderr, "Forge error: temporary path '%s' is not absolute\n", g_build_ctx.obj_path);
+            result = 1;
+            goto cleanup;
+        }
+        if (verbose) {
+            const char *fname = strrchr(source_path, '\\');
+            if (!fname) fname = strrchr(source_path, '/');
+            if (fname) fname++;
+            else fname = source_path;
+            fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+        }
+        result = assemble_object(source_path, g_build_ctx.obj_path);
     } else {
-        result = compile_source_to_asm(source_path, work_asm_path, 0);
+        if (!is_absolute_path(g_build_ctx.asm_path)) {
+            fprintf(stderr, "Forge error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
+            result = 1;
+            goto cleanup;
+        }
+        result = compile_source_to_asm(source_path, g_build_ctx.asm_path, 0);
         if (result != 0)
             goto cleanup;
 
-        result = assemble_object(work_asm_path, work_obj_path);
+        if (!is_absolute_path(g_build_ctx.asm_path) || !is_absolute_path(g_build_ctx.obj_path)) {
+            fprintf(stderr, "Forge error: temporary path is not absolute\n");
+            result = 1;
+            goto cleanup;
+        }
+        if (verbose) {
+            const char *fname = strrchr(g_build_ctx.asm_path, '\\');
+            if (!fname) fname = strrchr(g_build_ctx.asm_path, '/');
+            if (fname) fname++;
+            else fname = g_build_ctx.asm_path;
+            fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+        }
+        result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
     }
     if (result != 0)
         goto cleanup;
 
     {
-        const char *objs[] = {work_obj_path};
-        result = link_executable(objs, 1, work_exe_path);
+        const char *objs[] = {g_build_ctx.obj_path};
+        if (!is_absolute_path(g_build_ctx.obj_path) || !is_absolute_path(g_build_ctx.exe_path)) {
+            fprintf(stderr, "Forge error: temporary path is not absolute\n");
+            result = 1;
+            goto cleanup;
+        }
+        if (verbose) {
+            const char *fname = strrchr(g_build_ctx.obj_path, '\\');
+            if (!fname) fname = strrchr(g_build_ctx.obj_path, '/');
+            if (fname) fname++;
+            else fname = g_build_ctx.obj_path;
+            fprintf(stderr, "[Forge] linking:\n%s\n\n", fname);
+        }
+        result = link_executable(objs, 1, g_build_ctx.exe_path);
     }
     if (result != 0)
         goto cleanup;
 
-    if (copy_file_bytes(work_exe_path, output_path) != 0) {
-        fprintf(stderr, "Forge: failed to write '%s'\n", output_path);
+    fprintf(stderr,
+        "[Forge debug] copy source='%s' destination='%s'\n",
+        g_build_ctx.exe_path ? g_build_ctx.exe_path : "(null)",
+        output_path ? output_path : "(null)"
+    );
+    if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
+        fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
         result = 1;
         goto cleanup;
     }
-
-
 
     if (do_run) {
         char *run_short = short_path_dup(output_path);
@@ -1035,11 +1377,7 @@ int main(int argc, char *argv[]) {
 
 cleanup:
     forge_free_errors();
-    remove(work_asm_path);
-    remove(work_obj_path);
-    remove(work_exe_path);
-    if (work_drive_mapped)
-        unmap_work_drive();
+    perform_cleanup();
 
     free(default_output);
 
