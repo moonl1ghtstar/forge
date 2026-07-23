@@ -7,6 +7,9 @@
 forge/bin/
 tools/cpp/build/
 docs/superpowers/
+.agents/
+__pycache__/
+*.pyc
 
 # Except test .hlx source files
 !forge/helix/tests/*.hlx
