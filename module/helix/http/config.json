@@ -1,17 +1,14 @@
 {
     "module": {
-        "name": "console",
-        "version": "1.0.0"
+        "name": "http",
+        "version": "0.1.0"
     },
     "build": {
         "source_dir": "src/",
-        "library": "console.lib"
+        "library": "http.lib"
     },
     "funcs": [
-        "clear",
-        "color",
-        "input",
-        "print"
+        "get"
     ],
     "event": {
         "enabled": false,

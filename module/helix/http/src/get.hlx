@@ -1,0 +1,3 @@
+extern {
+    function get(url) -> str;
+}

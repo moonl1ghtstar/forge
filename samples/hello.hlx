@@ -1,9 +1,3 @@
 import console
 
-let message = "Hello from Helix!";
-
-function greet(name) {
-    console.print(name);
-}
-
-greet(message);
+console.print("Hello World!");
