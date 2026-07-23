@@ -243,26 +243,11 @@ static void sema_register_struct(SemaCtx *ctx, ASTNode *node) {
     }
 }
 
-/* Check if a name is a built-in function */
-static int is_builtin(const char *name) {
-    return (strcmp(name, "print") == 0 || strcmp(name, "input") == 0 ||
-            strcmp(name, "clear") == 0 || strcmp(name, "color") == 0 ||
-            strcmp(name, "console_print") == 0 || strcmp(name, "console_input") == 0 ||
-            strcmp(name, "console_clear") == 0 || strcmp(name, "console_color") == 0);
-}
-
 /* Register a function in the global function table */
 static void register_function(SemaCtx *ctx, const char *name, int param_count, int line) {
     int i;
     for (i = 0; i < ctx->func_count; i++) {
         if (strcmp(ctx->functions[i].name, name) == 0) {
-            /* Allow user-defined functions to shadow built-in names.
-             * The user's definition takes precedence; update the entry. */
-            if (is_builtin(name)) {
-                ctx->functions[i].param_count = param_count;
-                ctx->functions[i].line = line;
-                return;
-            }
             sema_error(ctx, line, "function '%s' is already defined. Rename one of the definitions.", name);
             return;
         }
@@ -356,8 +341,6 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
                        "function call '%s' passes %d arguments, but this backend supports at most %d.",
                        node->as.call.name, node->as.call.arg_count, MAX_CALL_ARGS);
         }
-        /* User-defined function takes priority over built-ins with the same name.
-         * Only fall back to built-in check when no user definition exists. */
         {
             FuncEntry *f = lookup_function(ctx, node->as.call.name);
             if (f) {
@@ -366,30 +349,12 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
                                "function '%s' expects %d argument(s), got %d.",
                                node->as.call.name, f->param_count, node->as.call.arg_count);
                 }
-            } else if (is_builtin(node->as.call.name)) {
-                int expected;
-                if (strcmp(node->as.call.name, "input") == 0 ||
-                    strcmp(node->as.call.name, "console_input") == 0 ||
-                    strcmp(node->as.call.name, "clear") == 0 ||
-                    strcmp(node->as.call.name, "console_clear") == 0)
-                    expected = 0;
-                else
-                    expected = 1;
-                if (node->as.call.arg_count != expected) {
-                    sema_error(ctx, node->line,
-                               "built-in function '%s' expects %d argument(s), got %d.",
-                               node->as.call.name, expected, node->as.call.arg_count);
-                }
             } else {
                 sema_error(ctx, node->line, "undefined function '%s'. Add an extern declaration or define it first.", node->as.call.name);
             }
         }
         for (i = 0; i < node->as.call.arg_count; i++)
             analyze_expr(ctx, node->as.call.args[i]);
-        if ((strcmp(node->as.call.name, "print") == 0 || strcmp(node->as.call.name, "console_print") == 0) && node->as.call.arg_count > 0) {
-            if (node->as.call.args[0]->resolved_type && is_struct_type(ctx, node->as.call.args[0]->resolved_type))
-                sema_error(ctx, node->line, "cannot print struct value '%s'.", node->as.call.args[0]->resolved_type);
-        }
         node->resolved_type = strdup("int");
         break;
     }

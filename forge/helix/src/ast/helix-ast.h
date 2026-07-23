@@ -14,25 +14,25 @@
 
 /* AST node type enumeration */
 typedef enum {
-    AST_PROGRAM,       /* Top-level program: list of functions */
-    AST_FUNCTION,      /* Function definition */
-    AST_BLOCK,         /* Block of statements { ... } */
-    AST_VAR_DECL,      /* Variable declaration: var x = expr; */
-    AST_ASSIGN,        /* Variable assignment: x = expr; */
-    AST_IF,            /* If/else statement */
-    AST_WHILE,         /* While loop */
-    AST_RETURN,        /* Return statement */
-    AST_BINARY,        /* Binary expression: lhs op rhs */
-    AST_UNARY,         /* Unary expression: op operand */
-    AST_NUMBER,        /* Integer literal */
-    AST_STRING,        /* String literal (for FFI) */
-    AST_VAR,           /* Variable reference */
-    AST_CALL,          /* Function call */
-    AST_EXTERN_FUNC,   /* Extern function declaration (FFI) */
-    AST_STRUCT_DECL,   /* Struct type declaration */
-    AST_STRUCT_INIT,   /* Struct variable initialization */
-    AST_FIELD_ACCESS,  /* Field access expression */
-    AST_EXPR_STMT,     /* Expression statement */
+    AST_PROGRAM,      /* Top-level program: list of functions */
+    AST_FUNCTION,     /* Function definition */
+    AST_BLOCK,        /* Block of statements { ... } */
+    AST_VAR_DECL,     /* Variable declaration: var x = expr; */
+    AST_ASSIGN,       /* Variable assignment: x = expr; */
+    AST_IF,           /* If/else statement */
+    AST_WHILE,        /* While loop */
+    AST_RETURN,       /* Return statement */
+    AST_BINARY,       /* Binary expression: lhs op rhs */
+    AST_UNARY,        /* Unary expression: op operand */
+    AST_NUMBER,       /* Integer literal */
+    AST_STRING,       /* String literal (for FFI) */
+    AST_VAR,          /* Variable reference */
+    AST_CALL,         /* Function call */
+    AST_EXTERN_FUNC,  /* Extern function declaration (FFI) */
+    AST_STRUCT_DECL,  /* Struct type declaration */
+    AST_STRUCT_INIT,  /* Struct variable initialization */
+    AST_FIELD_ACCESS, /* Field access expression */
+    AST_EXPR_STMT,    /* Expression statement */
     AST_FOR,
     AST_DO_WHILE,
     AST_BREAK,
@@ -41,14 +41,22 @@ typedef enum {
 
 /* Binary operator types */
 typedef enum {
-    BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV,
-    BIN_EQ, BIN_NEQ, BIN_LT, BIN_GT, BIN_LE, BIN_GE
+    BIN_ADD,
+    BIN_SUB,
+    BIN_MUL,
+    BIN_DIV,
+    BIN_EQ,
+    BIN_NEQ,
+    BIN_LT,
+    BIN_GT,
+    BIN_LE,
+    BIN_GE
 } BinaryOp;
 
 /* Unary operator types */
 typedef enum {
-    UNARY_NEG,  /* -x */
-    UNARY_NOT   /* !x */
+    UNARY_NEG, /* -x */
+    UNARY_NOT  /* !x */
 } UnaryOp;
 
 /* Forward declaration */
@@ -61,8 +69,8 @@ typedef struct ASTNode ASTNode;
  */
 struct ASTNode {
     ASTNodeType type;
-    char *resolved_type;  /* Type name after semantic analysis (e.g., "int") */
-    int line;             /* Source line for error reporting */
+    char *resolved_type; /* Type name after semantic analysis (e.g., "int") */
+    int line;            /* Source line for error reporting */
 
     union {
         /* AST_PROGRAM: top-level list of function definitions */
@@ -101,7 +109,7 @@ struct ASTNode {
         struct {
             ASTNode *cond;
             ASTNode *then_block;
-            ASTNode *else_block;  /* NULL if no else clause */
+            ASTNode *else_block; /* NULL if no else clause */
         } if_stmt;
 
         /* AST_WHILE: condition and loop body */

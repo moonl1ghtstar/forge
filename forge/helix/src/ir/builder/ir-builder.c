@@ -283,17 +283,8 @@ static IRValue lower_call(IRBuilder *b, ASTNode *node) {
             ins.as.call.args[i] = lower_expr(b, node->as.call.args[i]);
     }
 
-    if (strcmp(fname, "print") == 0 || strcmp(fname, "console_print") == 0 ||
-        strcmp(fname, "clear") == 0 || strcmp(fname, "console_clear") == 0 ||
-        strcmp(fname, "color") == 0 || strcmp(fname, "console_color") == 0) {
-        ins.has_result = 0;
-        ir_block_add_instruction(current_block(b), ins);
-        return ir_value_const_int(0);
-    }
-
     ins.has_result = 1;
-    ins.result = ir_value_temp(new_temp(b),
-                               strcmp(fname, "input") == 0 || strcmp(fname, "console_input") == 0);
+    ins.result = ir_value_temp(new_temp(b), 0);
     ir_block_add_instruction(current_block(b), ins);
     return ir_value_temp(ins.result.as.temp_id, ins.result.is_string);
 }
