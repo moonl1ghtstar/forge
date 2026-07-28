@@ -216,6 +216,12 @@ static int peek_token_type(Parser *p, int steps, TokenType *type_out, char **lex
 }
 
 static void parse_module_body(Parser *p, ASTNode *shared_prog, ASTNode *local_prog);
+typedef struct {
+    char *bare_name;  /* original pre-rename name */
+    char *final_name; /* name after namespace rename */
+} RenameEntry;
+static void rename_calls_by_map(ASTNode *node,
+                                const RenameEntry *map, int map_count);
 
 /* ---- Forward declarations for recursive descent ---- */
 static ASTNode *parse_function(Parser *p);
@@ -298,6 +304,42 @@ ASTNode *parse_program(Parser *p) {
             if (stmt)
                 block_add_stmt(entry_block, stmt);
         }
+    }
+
+    /* Rewrite call-sites in root/local bodies after all imports are known.
+     * Imported functions carry bare_name; imported externs carry link_name.
+     * Local declarations keep bare names and are ignored here. */
+    {
+        RenameEntry *rmap = NULL;
+        int rmap_count = 0;
+
+        for (i = 0; i < prog->as.program.count; i++) {
+            ASTNode *node = prog->as.program.functions[i];
+            if (!node)
+                continue;
+            if (node->type == AST_FUNCTION && node->as.function.bare_name) {
+                rmap = (RenameEntry *)realloc(rmap, sizeof(RenameEntry) * (rmap_count + 1));
+                rmap[rmap_count].bare_name = node->as.function.bare_name;
+                rmap[rmap_count].final_name = node->as.function.name;
+                rmap_count++;
+            } else if (node->type == AST_EXTERN_FUNC && node->as.extern_func.link_name) {
+                rmap = (RenameEntry *)realloc(rmap, sizeof(RenameEntry) * (rmap_count + 1));
+                rmap[rmap_count].bare_name = node->as.extern_func.link_name;
+                rmap[rmap_count].final_name = node->as.extern_func.name;
+                rmap_count++;
+            }
+        }
+
+        if (rmap_count > 0) {
+            if (entry_block)
+                rename_calls_by_map(entry_block, rmap, rmap_count);
+            for (i = 0; i < prog->as.program.count; i++) {
+                ASTNode *node = prog->as.program.functions[i];
+                if (node && node->type == AST_FUNCTION && !node->as.function.is_imported)
+                    rename_calls_by_map(node->as.function.body, rmap, rmap_count);
+            }
+        }
+        free(rmap);
     }
 
     for (i = 0; i < prog->as.program.count; i++) {
@@ -473,6 +515,25 @@ static char *extract_json_string(const char *json, const char *key) {
     return val;
 }
 
+static char *extract_json_symbol_link(const char *json, const char *symbol_name) {
+    char symbols_key[128];
+    char symbol_key[128];
+    const char *symbols;
+    const char *symbol;
+
+    snprintf(symbols_key, sizeof(symbols_key), "\"symbols\"");
+    symbols = strstr(json, symbols_key);
+    if (!symbols)
+        return NULL;
+
+    snprintf(symbol_key, sizeof(symbol_key), "\"%s\"", symbol_name);
+    symbol = strstr(symbols, symbol_key);
+    if (!symbol)
+        return NULL;
+
+    return extract_json_string(symbol, "link");
+}
+
 static int extract_json_array(const char *json, const char *key, char ***out_arr) {
     char search_key[128];
     snprintf(search_key, sizeof(search_key), "\"%s\"", key);
@@ -585,6 +646,9 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
     } else if (func->type == AST_EXTERN_FUNC) {
         char *old_name = func->as.extern_func.name;
         fprintf(stderr, "[rename] AST_EXTERN_FUNC: %s -> %s_%s\n", old_name, ns_name, old_name);
+        /* Preserve original linker symbol before rename */
+        if (!func->as.extern_func.link_name)
+            func->as.extern_func.link_name = strdup(old_name);
         func->as.extern_func.name = dup_qualified_name(ns_name, old_name);
         free(old_name);
     }
@@ -680,11 +744,6 @@ static void rename_calls_in_ast(ASTNode *node, const char *ns_name,
  * Only exact bare_name matches are rewritten; extern / system calls are left
  * untouched because they will not appear in the map.
  */
-typedef struct {
-    char *bare_name;  /* original pre-rename name */
-    char *final_name; /* name after namespace rename */
-} RenameEntry;
-
 static void rename_calls_by_map(ASTNode *node,
                                 const RenameEntry *map, int map_count) {
     int i, k;
@@ -879,7 +938,6 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
         char *source_dir = extract_json_string(config_content, "source_dir");
         char **module_funcs = NULL;
         int module_func_count = extract_json_array(config_content, "funcs", &module_funcs);
-        free(config_content);
 
         char **funcs_to_load = NULL;
         int load_count = 0;
@@ -898,6 +956,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                     forge_report_error(SEV_ERROR, "E602", p->current.line, p->current.col, NULL, NULL, "symbol '%s' was not found in module '%s'", select_funcs[i], module_name);
                     if (source_dir)
                         free(source_dir);
+                    free(config_content);
                     if (module_funcs) {
                         for (j = 0; j < module_func_count; j++)
                             free(module_funcs[j]);
@@ -921,6 +980,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                 forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s': cannot load function '%s'", module_name, func_name);
                 if (source_dir)
                     free(source_dir);
+                free(config_content);
                 if (module_funcs) {
                     for (j = 0; j < module_func_count; j++)
                         free(module_funcs[j]);
@@ -938,6 +998,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                 free(func_source);
                 if (source_dir)
                     free(source_dir);
+                free(config_content);
                 if (module_funcs) {
                     for (j = 0; j < module_func_count; j++)
                         free(module_funcs[j]);
@@ -956,14 +1017,20 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             rename_module_functions(module_prog, module_name);
             /* rename_module_functions skips AST_EXTERN_FUNC nodes (they have
              * no is_imported flag).  For system modules each per-function
-             * .hlx file may declare the extern itself, so we must rename it
-             * here so sema sees e.g. "console_print" not bare "print". */
+             * .hlx file may declare the extern itself, so we must set
+             * link_name from config metadata before renaming name. */
             {
                 int k;
                 for (k = 0; k < module_prog->as.program.count; k++) {
                     ASTNode *en = module_prog->as.program.functions[k];
-                    if (en && en->type == AST_EXTERN_FUNC)
+                    if (en && en->type == AST_EXTERN_FUNC) {
+                        char *link_name = extract_json_symbol_link(config_content, en->as.extern_func.name);
+                        if (!link_name)
+                            link_name = strdup(en->as.extern_func.name);
+                        free(en->as.extern_func.link_name);
+                        en->as.extern_func.link_name = link_name;
                         rename_single_function(en, module_name);
+                    }
                 }
             }
             append_program(prog, module_prog);
@@ -973,6 +1040,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
 
         if (source_dir)
             free(source_dir);
+        free(config_content);
         if (module_funcs) {
             for (j = 0; j < module_func_count; j++)
                 free(module_funcs[j]);
@@ -1073,6 +1141,17 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                         rmap[rmap_count].bare_name  = sf->as.function.bare_name;
                         rmap[rmap_count].final_name = sf->as.function.name;
                         rmap_count++;
+                    } else if (sf && sf->type == AST_EXTERN_FUNC) {
+                        const char *bare = sf->as.extern_func.link_name
+                                           ? sf->as.extern_func.link_name
+                                           : sf->as.extern_func.name;
+                        if (bare && sf->as.extern_func.name) {
+                            rmap = (RenameEntry *)realloc(rmap,
+                                sizeof(RenameEntry) * (rmap_count + 1));
+                            rmap[rmap_count].bare_name  = (char *)bare;
+                            rmap[rmap_count].final_name = sf->as.extern_func.name;
+                            rmap_count++;
+                        }
                     }
                 }
                 /* 2) from global registry (covers cache-hit imports) */

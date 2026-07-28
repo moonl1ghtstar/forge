@@ -1,19 +1,19 @@
 {
     "module": {
-        "name": "http",
-        "version": "0.1.0"
+        "name": "win32",
+        "version": "1.0.0"
     },
     "build": {
         "source_dir": "src/",
-        "library": "http.lib"
+        "library": ""
     },
     "symbols": {
-        "get": {
-            "link": "http_get"
+        "GetTickCount": {
+            "link": "GetTickCount"
         }
     },
     "funcs": [
-        "get"
+        "GetTickCount"
     ],
     "event": {
         "enabled": false,

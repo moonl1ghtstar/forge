@@ -7,6 +7,20 @@
         "source_dir": "src/",
         "library": "console.lib"
     },
+    "symbols": {
+        "clear": {
+            "link": "console_clear"
+        },
+        "color": {
+            "link": "console_color"
+        },
+        "input": {
+            "link": "console_input"
+        },
+        "print": {
+            "link": "console_print"
+        }
+    },
     "funcs": [
         "clear",
         "color",
