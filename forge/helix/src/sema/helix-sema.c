@@ -14,11 +14,6 @@
 #include "helix-sema.h"
 #include "../errors/forge-errors.h"
 
-/* The current Windows x64 backend only passes up to 4 integer arguments
- * in registers. Reject wider call signatures instead of silently
- * truncating them in codegen. */
-#define MAX_CALL_ARGS 4
-
 /* ---- Symbol table (simple linear-scan arrays) ---- */
 
 /* A variable entry: name and its stack offset (computed during codegen) */
@@ -336,11 +331,8 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
         break;
     case AST_CALL: {
         int i;
-        if (node->as.call.arg_count > MAX_CALL_ARGS) {
-            sema_error(ctx, node->line,
-                       "function call '%s' passes %d arguments, but this backend supports at most %d.",
-                       node->as.call.name, node->as.call.arg_count, MAX_CALL_ARGS);
-        }
+        for (i = 0; i < node->as.call.arg_count; i++)
+            analyze_expr(ctx, node->as.call.args[i]);
         {
             FuncEntry *f = lookup_function(ctx, node->as.call.name);
             if (f) {
@@ -349,12 +341,16 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
                                "function '%s' expects %d argument(s), got %d.",
                                node->as.call.name, f->param_count, node->as.call.arg_count);
                 }
+            } else if (strcmp(node->as.call.name, "strlen") == 0) {
+                if (node->as.call.arg_count != 1) {
+                    sema_error(ctx, node->line,
+                               "function 'strlen' expects 1 argument, got %d.",
+                               node->as.call.arg_count);
+                }
             } else {
                 sema_error(ctx, node->line, "undefined function '%s'. Add an extern declaration or define it first.", node->as.call.name);
             }
         }
-        for (i = 0; i < node->as.call.arg_count; i++)
-            analyze_expr(ctx, node->as.call.args[i]);
         node->resolved_type = strdup("int");
         break;
     }
@@ -618,20 +614,10 @@ int sema_analyze(ASTNode *program) {
     for (i = 0; i < program->as.program.count; i++) {
         ASTNode *node = program->as.program.functions[i];
         if (node->type == AST_FUNCTION) {
-            if (node->as.function.param_count > MAX_CALL_ARGS) {
-                sema_error(&ctx, node->line,
-                           "function '%s' declares %d parameters, but this backend supports at most %d.",
-                           node->as.function.name, node->as.function.param_count, MAX_CALL_ARGS);
-            }
             register_function(&ctx, node->as.function.name,
                               node->as.function.param_count, node->line);
         } else if (node->type == AST_EXTERN_FUNC) {
             /* Register extern functions so they can be called */
-            if (node->as.extern_func.param_count > MAX_CALL_ARGS) {
-                sema_error(&ctx, node->line,
-                           "extern function '%s' declares %d parameters, but this backend supports at most %d.",
-                           node->as.extern_func.name, node->as.extern_func.param_count, MAX_CALL_ARGS);
-            }
             register_function(&ctx, node->as.extern_func.name,
                               node->as.extern_func.param_count, node->line);
         }

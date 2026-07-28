@@ -10,10 +10,58 @@
     "symbols": {
         "GetTickCount": {
             "link": "GetTickCount"
+        },
+        "Sleep": {
+            "link": "Sleep"
+        },
+        "GetCurrentProcessId": {
+            "link": "GetCurrentProcessId"
+        },
+        "GetCurrentThreadId": {
+            "link": "GetCurrentThreadId"
+        },
+        "GetStdHandle": {
+            "link": "GetStdHandle"
+        },
+        "GetProcessHeap": {
+            "link": "GetProcessHeap"
+        },
+        "HeapAlloc": {
+            "link": "HeapAlloc"
+        },
+        "HeapFree": {
+            "link": "HeapFree"
+        },
+        "GetEnvironmentVariableA": {
+            "link": "GetEnvironmentVariableA"
+        },
+        "SetEnvironmentVariableA": {
+            "link": "SetEnvironmentVariableA"
+        },
+        "WriteConsoleA": {
+            "link": "WriteConsoleA"
+        },
+        "WriteFile": {
+            "link": "WriteFile"
+        },
+        "MessageBoxA": {
+            "link": "MessageBoxA"
         }
     },
     "funcs": [
-        "GetTickCount"
+        "GetTickCount",
+        "Sleep",
+        "GetCurrentProcessId",
+        "GetCurrentThreadId",
+        "GetStdHandle",
+        "GetProcessHeap",
+        "HeapAlloc",
+        "HeapFree",
+        "GetEnvironmentVariableA",
+        "SetEnvironmentVariableA",
+        "WriteConsoleA",
+        "WriteFile",
+        "MessageBoxA"
     ],
     "event": {
         "enabled": false,

@@ -123,7 +123,8 @@ typedef struct {
 } IRBasicBlock;
 
 typedef struct {
-    char *name;
+    char *name;       /* qualified name used inside IR, e.g. win32_GetTickCount */
+    char *link_name;  /* actual linker symbol, e.g. GetTickCount (NULL = same as name) */
     int is_extern;
     char **params;
     int param_count;

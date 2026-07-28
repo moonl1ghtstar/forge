@@ -1,0 +1,3 @@
+extern {
+    function HeapAlloc(heap: long, flags: int, bytes: int) -> long;
+}

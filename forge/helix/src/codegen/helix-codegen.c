@@ -20,6 +20,8 @@ typedef struct {
 typedef struct {
     FILE *out;
     int label_count;
+    const IRProgram *program; /* for link_name lookup in calls */
+    int need_strlen_extern;
 } CodegenCtx;
 
 static StringEntry *string_table = NULL;
@@ -158,6 +160,8 @@ static void scan_function(const IRFunction *func, CodegenCtx *ctx) {
                 scan_value(ins->as.branch.cond);
                 break;
             case IR_OP_CALL:
+                if (ins->as.call.callee && strcmp(ins->as.call.callee, "strlen") == 0)
+                    ctx->need_strlen_extern = 1;
                 for (int k = 0; k < ins->as.call.arg_count; k++)
                     scan_value(ins->as.call.args[k]);
                 break;
@@ -227,10 +231,32 @@ static void emit_compare(CodegenCtx *ctx, const IRFunction *func, const IRInstru
 static void emit_call_generic(CodegenCtx *ctx, const IRFunction *func, const IRInstruction *ins) {
     static const char *regs[] = {"rcx", "rdx", "r8", "r9"};
     int i;
+    int stack_arg_count = ins->as.call.arg_count > 4 ? ins->as.call.arg_count - 4 : 0;
+    int stack_bytes = stack_arg_count > 0 ? align16(stack_arg_count * 8) : 0;
+    const char *callee = ins->as.call.callee;
+    /* Resolve real linker symbol if this is an extern with link_name */
+    if (ctx->program) {
+        for (i = 0; i < ctx->program->function_count; i++) {
+            const IRFunction *f = &ctx->program->functions[i];
+            if (f->is_extern && f->name && strcmp(f->name, callee) == 0 && f->link_name) {
+                callee = f->link_name;
+                break;
+            }
+        }
+    }
     for (i = 0; i < ins->as.call.arg_count && i < 4; i++)
         emit_value_to_reg(ctx, func, ins->as.call.args[i], regs[i]);
+    if (stack_bytes > 0) {
+        emit(ctx, "    sub rsp, %d", stack_bytes);
+        for (i = 4; i < ins->as.call.arg_count; i++) {
+            emit_value_to_reg(ctx, func, ins->as.call.args[i], "rax");
+            emit(ctx, "    mov [rsp+%d], rax", 32 + (i - 4) * 8);
+        }
+    }
     emit(ctx, "    xor eax, eax");
-    emit(ctx, "    call %s", ins->as.call.callee);
+    emit(ctx, "    call %s", callee);
+    if (stack_bytes > 0)
+        emit(ctx, "    add rsp, %d", stack_bytes);
     if (ins->has_result && ins->result.kind == IR_VALUE_TEMP)
         emit_store_result(ctx, ins->result);
 }
@@ -316,6 +342,10 @@ static void emit_function(CodegenCtx *ctx, const IRFunction *func) {
         static const char *regs[] = {"rcx", "rdx", "r8", "r9"};
         emit(ctx, "    mov [rbp-%d], %s", local_offset(func, i, 0), regs[i]);
     }
+    for (i = 4; i < func->param_count; i++) {
+        emit(ctx, "    mov rax, [rbp+%d]", 48 + (i - 4) * 8);
+        emit(ctx, "    mov [rbp-%d], rax", local_offset(func, i, 0));
+    }
 
     for (i = 0; i < func->block_count; i++) {
         const IRBasicBlock *block = &func->blocks[i];
@@ -339,6 +369,8 @@ int codegen_emit(IRProgram *program, FILE *out) {
 
     ctx.out = out;
     ctx.label_count = 0;
+    ctx.program = program;
+    ctx.need_strlen_extern = 0;
 
     string_table_reset();
     scan_program(program, &ctx);
@@ -365,9 +397,15 @@ int codegen_emit(IRProgram *program, FILE *out) {
     }
 
     fprintf(out, "\nsection .text\n");
+    if (ctx.need_strlen_extern)
+        fprintf(out, "    extern strlen\n");
     for (i = 0; i < program->function_count; i++) {
-        if (program->functions[i].is_extern)
-            fprintf(out, "    extern %s\n", program->functions[i].name);
+        if (program->functions[i].is_extern) {
+            const char *sym = program->functions[i].link_name
+                              ? program->functions[i].link_name
+                              : program->functions[i].name;
+            fprintf(out, "    extern %s\n", sym);
+        }
     }
 
     fprintf(out, "\n");

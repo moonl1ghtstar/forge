@@ -1,0 +1,9 @@
+extern {
+    function WriteConsoleA(
+        hConsoleOutput: long,
+        lpBuffer: str,
+        nNumberOfCharsToWrite: int,
+        lpNumberOfCharsWritten: long,
+        lpReserved: long
+    ) -> int;
+}

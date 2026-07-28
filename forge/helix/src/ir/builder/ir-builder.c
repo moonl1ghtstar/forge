@@ -822,6 +822,9 @@ IRProgram *ir_build_program(ASTNode *program) {
         } else if (node->type == AST_EXTERN_FUNC) {
             IRFunction *ext = ir_function_new(node->as.extern_func.name, 1);
             int j;
+            /* Preserve original linker symbol (e.g. GetTickCount) if set */
+            if (node->as.extern_func.link_name)
+                ext->link_name = strdup(node->as.extern_func.link_name);
             for (j = 0; j < node->as.extern_func.param_count; j++) {
                 ext->params = (char **)realloc(ext->params, sizeof(char *) * (ext->param_count + 1));
                 ext->params[ext->param_count++] = strdup(node->as.extern_func.param_types[j]);

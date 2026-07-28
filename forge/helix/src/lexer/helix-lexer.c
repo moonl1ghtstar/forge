@@ -229,8 +229,28 @@ static Token read_string(Lexer *lex) {
         return error_token("unterminated string literal", line, col);
     int len = lex->pos - start;
     char *buf = (char *)malloc(len + 1);
-    memcpy(buf, lex->source + start, len);
-    buf[len] = '\0';
+    int out = 0;
+    int i = 0;
+    while (i < len) {
+        char c = lex->source[start + i];
+        if (c == '\\' && i + 1 < len) {
+            char esc = lex->source[start + i + 1];
+            switch (esc) {
+            case 'n': buf[out++] = '\n'; break;
+            case 'r': buf[out++] = '\r'; break;
+            case 't': buf[out++] = '\t'; break;
+            case '\\': buf[out++] = '\\'; break;
+            case '"': buf[out++] = '"'; break;
+            case '\'': buf[out++] = '\''; break;
+            default: buf[out++] = esc; break;
+            }
+            i += 2;
+            continue;
+        }
+        buf[out++] = c;
+        i++;
+    }
+    buf[out] = '\0';
     advance(lex); /* consume closing quote */
     Token t;
     t.type = TOKEN_STRING;

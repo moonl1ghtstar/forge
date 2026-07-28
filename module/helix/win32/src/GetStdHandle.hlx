@@ -1,0 +1,3 @@
+extern {
+    function GetStdHandle(nStdHandle: int) -> long;
+}

@@ -92,6 +92,7 @@ void ir_function_free(IRFunction *func) {
     if (!func)
         return;
     free(func->name);
+    free(func->link_name);
     for (i = 0; i < func->param_count; i++)
         free(func->params[i]);
     free(func->params);

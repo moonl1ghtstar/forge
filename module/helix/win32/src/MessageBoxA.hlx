@@ -1,0 +1,8 @@
+extern {
+    function MessageBoxA(
+        hwnd: long,
+        text: str,
+        caption: str,
+        type: int
+    ) -> int;
+}

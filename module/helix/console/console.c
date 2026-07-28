@@ -1,33 +1,5 @@
-#include <stdint.h>
 #include <stdio.h>
 #include <windows.h>
-
-static int console_is_string(uintptr_t value) {
-    MEMORY_BASIC_INFORMATION info;
-    const char *s = (const char *)value;
-    size_t i;
-
-    if (value < 65536)
-        return 0;
-    if (!VirtualQuery(s, &info, sizeof(info)))
-        return 0;
-    if (info.State != MEM_COMMIT || (info.Protect & PAGE_NOACCESS))
-        return 0;
-
-    for (i = 0; i < 4096; i++) {
-        if (s[i] == '\0')
-            return 1;
-    }
-    return 0;
-}
-
-int console_print(intptr_t value) {
-    if (console_is_string((uintptr_t)value))
-        printf("%s\n", (const char *)value);
-    else
-        printf("%lld\n", (long long)value);
-    return 0;
-}
 
 char *console_input(void) {
     static char buf[256];

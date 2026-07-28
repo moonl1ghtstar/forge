@@ -1,3 +1,10 @@
-extern {
-    function print(value) -> int;
+import win32
+
+function print(value) {
+    let h = win32.GetStdHandle(-11);
+    let len = strlen(value);
+    let written = "aaaa";
+    win32.WriteFile(h, value, len, written, 0);
+    win32.WriteFile(h, "\n", 1, written, 0);
+    return 0;
 }

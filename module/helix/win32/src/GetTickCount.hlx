@@ -1,0 +1,3 @@
+extern {
+    function GetTickCount() -> int;
+}

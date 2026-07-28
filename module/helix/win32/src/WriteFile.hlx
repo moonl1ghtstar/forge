@@ -1,0 +1,9 @@
+extern {
+    function WriteFile(
+        hFile: long,
+        lpBuffer: str,
+        nNumberOfBytesToWrite: int,
+        lpNumberOfBytesWritten: long,
+        lpOverlapped: long
+    ) -> int;
+}

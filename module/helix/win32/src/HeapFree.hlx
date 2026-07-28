@@ -1,0 +1,3 @@
+extern {
+    function HeapFree(heap: long, flags: int, mem: long) -> int;
+}

@@ -1,0 +1,6 @@
+import console
+import win32
+
+console.print(win32.GetCurrentProcessId());
+win32.Sleep(1000);
+console.print(win32.GetTickCount());

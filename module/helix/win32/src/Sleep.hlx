@@ -1,0 +1,3 @@
+extern {
+    function Sleep(ms: int);
+}

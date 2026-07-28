@@ -1021,9 +1021,15 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
              * link_name from config metadata before renaming name. */
             {
                 int k;
+                size_t module_prefix_len = strlen(module_name);
                 for (k = 0; k < module_prog->as.program.count; k++) {
                     ASTNode *en = module_prog->as.program.functions[k];
                     if (en && en->type == AST_EXTERN_FUNC) {
+                        if (en->as.extern_func.name &&
+                            strncmp(en->as.extern_func.name, module_name, module_prefix_len) != 0 &&
+                            strchr(en->as.extern_func.name, '_')) {
+                            continue;
+                        }
                         char *link_name = extract_json_symbol_link(config_content, en->as.extern_func.name);
                         if (!link_name)
                             link_name = strdup(en->as.extern_func.name);

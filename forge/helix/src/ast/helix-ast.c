@@ -99,6 +99,7 @@ void ast_free(ASTNode *node) {
     case AST_EXTERN_FUNC: {
         int i;
         free(node->as.extern_func.name);
+        free(node->as.extern_func.link_name);
         for (i = 0; i < node->as.extern_func.param_count; i++)
             free(node->as.extern_func.param_types[i]);
         free(node->as.extern_func.param_types);

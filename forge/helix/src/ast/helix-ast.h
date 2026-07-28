@@ -162,7 +162,8 @@ struct ASTNode {
 
         /* AST_EXTERN_FUNC: extern function declaration with param types */
         struct {
-            char *name;
+            char *name;        /* qualified name used by sema/calls, e.g. win32_GetTickCount */
+            char *link_name;   /* original linker symbol, e.g. GetTickCount (NULL = same as name) */
             char **param_types;
             int param_count;
             char *return_type;
