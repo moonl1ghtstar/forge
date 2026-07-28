@@ -86,6 +86,7 @@ struct ASTNode {
             int param_count;
             ASTNode *body;
             int is_imported; /* 1 = arrived via import (already renamed); 0 = defined locally */
+            char *bare_name; /* original pre-rename name, set by rename_single_function; NULL if never renamed */
         } function;
 
         /* AST_BLOCK: list of statements */

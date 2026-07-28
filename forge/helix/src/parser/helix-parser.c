@@ -47,6 +47,25 @@ static void module_cache_register(const char *path) {
     g_loaded_modules[g_loaded_module_count++] = strdup(path);
 }
 
+/* ---- Global rename registry ----
+ * Every time rename_single_function() renames an AST_FUNCTION node it stores
+ * the bare->final mapping here so that later modules (including those whose
+ * import was a cache-hit) can still fix up their call-sites.
+ * Lifetime: one compiler invocation (static, never freed at exit).
+ */
+#define RENAME_REG_MAX 1024
+typedef struct { char *bare; char *final; } RenameRegEntry;
+static RenameRegEntry g_rename_reg[RENAME_REG_MAX];
+static int            g_rename_reg_count = 0;
+
+static void rename_reg_add(const char *bare, const char *final_name) {
+    if (g_rename_reg_count >= RENAME_REG_MAX)
+        return;
+    g_rename_reg[g_rename_reg_count].bare  = strdup(bare);
+    g_rename_reg[g_rename_reg_count].final = strdup(final_name);
+    g_rename_reg_count++;
+}
+
 /* ---- Internal helpers ---- */
 
 static void describe_token(const Token *tok, char *buf, size_t buf_size) {
@@ -556,7 +575,12 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
     if (func->type == AST_FUNCTION) {
         char *old_name = func->as.function.name;
         fprintf(stderr, "[rename] AST_FUNCTION: %s -> %s_%s\n", old_name, ns_name, old_name);
+        /* Save bare (pre-rename) name so rename_calls_by_map can match it */
+        if (!func->as.function.bare_name)
+            func->as.function.bare_name = strdup(old_name);
         func->as.function.name = dup_qualified_name(ns_name, old_name);
+        /* Register globally so cache-hit imports can also fix their call-sites */
+        rename_reg_add(func->as.function.bare_name, func->as.function.name);
         free(old_name);
     } else if (func->type == AST_EXTERN_FUNC) {
         char *old_name = func->as.extern_func.name;
@@ -641,6 +665,94 @@ static void rename_calls_in_ast(ASTNode *node, const char *ns_name,
         break;
     case AST_FIELD_ACCESS:
         rename_calls_in_ast(node->as.field_access.object, ns_name, local_names, local_count);
+        break;
+    default:
+        break;
+    }
+}
+
+/*
+ * rename_calls_by_map - Walk `node` recursively and rewrite AST_CALL names
+ * using a bare->final name map built from imported (already-renamed) functions.
+ * Used to fix up call-sites in a local module body that call functions which
+ * were pulled in via a nested import (i.e. shared dependencies).
+ *
+ * Only exact bare_name matches are rewritten; extern / system calls are left
+ * untouched because they will not appear in the map.
+ */
+typedef struct {
+    char *bare_name;  /* original pre-rename name */
+    char *final_name; /* name after namespace rename */
+} RenameEntry;
+
+static void rename_calls_by_map(ASTNode *node,
+                                const RenameEntry *map, int map_count) {
+    int i, k;
+    if (!node || map_count == 0)
+        return;
+
+    switch (node->type) {
+    case AST_CALL: {
+        for (k = 0; k < map_count; k++) {
+            if (strcmp(node->as.call.name, map[k].bare_name) == 0) {
+                char *old = node->as.call.name;
+                node->as.call.name = strdup(map[k].final_name);
+                fprintf(stderr, "[rename_map] call %s -> %s\n", old, node->as.call.name);
+                free(old);
+                break;
+            }
+        }
+        for (i = 0; i < node->as.call.arg_count; i++)
+            rename_calls_by_map(node->as.call.args[i], map, map_count);
+        break;
+    }
+    case AST_FUNCTION:
+        rename_calls_by_map(node->as.function.body, map, map_count);
+        break;
+    case AST_BLOCK:
+        for (i = 0; i < node->as.block.count; i++)
+            rename_calls_by_map(node->as.block.stmts[i], map, map_count);
+        break;
+    case AST_VAR_DECL:
+        rename_calls_by_map(node->as.var_decl.init, map, map_count);
+        break;
+    case AST_ASSIGN:
+        rename_calls_by_map(node->as.assign.value, map, map_count);
+        break;
+    case AST_RETURN:
+        rename_calls_by_map(node->as.return_stmt.expr, map, map_count);
+        break;
+    case AST_IF:
+        rename_calls_by_map(node->as.if_stmt.cond, map, map_count);
+        rename_calls_by_map(node->as.if_stmt.then_block, map, map_count);
+        rename_calls_by_map(node->as.if_stmt.else_block, map, map_count);
+        break;
+    case AST_WHILE:
+        rename_calls_by_map(node->as.while_stmt.cond, map, map_count);
+        rename_calls_by_map(node->as.while_stmt.body, map, map_count);
+        break;
+    case AST_FOR:
+        rename_calls_by_map(node->as.for_stmt.init, map, map_count);
+        rename_calls_by_map(node->as.for_stmt.cond, map, map_count);
+        rename_calls_by_map(node->as.for_stmt.incr, map, map_count);
+        rename_calls_by_map(node->as.for_stmt.body, map, map_count);
+        break;
+    case AST_DO_WHILE:
+        rename_calls_by_map(node->as.while_stmt.cond, map, map_count);
+        rename_calls_by_map(node->as.while_stmt.body, map, map_count);
+        break;
+    case AST_BINARY:
+        rename_calls_by_map(node->as.binary.left, map, map_count);
+        rename_calls_by_map(node->as.binary.right, map, map_count);
+        break;
+    case AST_UNARY:
+        rename_calls_by_map(node->as.unary.operand, map, map_count);
+        break;
+    case AST_EXPR_STMT:
+        rename_calls_by_map(node->as.expr_stmt.expr, map, map_count);
+        break;
+    case AST_FIELD_ACCESS:
+        rename_calls_by_map(node->as.field_access.object, map, map_count);
         break;
     default:
         break;
@@ -943,6 +1055,56 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             free(project_source);
             return 0;
         } else {
+            /* --- Build rename map: shared_prog entries + global registry ---
+             * shared_prog holds functions pulled in via nested imports in this
+             * load; g_rename_reg holds ALL renames across the entire compiler
+             * invocation, including those from cache-hit imports.  We merge
+             * both so that call-sites are fixed regardless of cache state. */
+            RenameEntry *rmap = NULL;
+            int rmap_count = 0;
+            {
+                int si;
+                /* 1) from shared_prog (nested imports parsed this time) */
+                for (si = 0; si < shared_prog->as.program.count; si++) {
+                    ASTNode *sf = shared_prog->as.program.functions[si];
+                    if (sf && sf->type == AST_FUNCTION && sf->as.function.bare_name) {
+                        rmap = (RenameEntry *)realloc(rmap,
+                            sizeof(RenameEntry) * (rmap_count + 1));
+                        rmap[rmap_count].bare_name  = sf->as.function.bare_name;
+                        rmap[rmap_count].final_name = sf->as.function.name;
+                        rmap_count++;
+                    }
+                }
+                /* 2) from global registry (covers cache-hit imports) */
+                for (si = 0; si < g_rename_reg_count; si++) {
+                    int already = 0, ki;
+                    for (ki = 0; ki < rmap_count; ki++) {
+                        if (strcmp(rmap[ki].bare_name, g_rename_reg[si].bare) == 0) {
+                            already = 1;
+                            break;
+                        }
+                    }
+                    if (!already) {
+                        rmap = (RenameEntry *)realloc(rmap,
+                            sizeof(RenameEntry) * (rmap_count + 1));
+                        rmap[rmap_count].bare_name  = g_rename_reg[si].bare;
+                        rmap[rmap_count].final_name = g_rename_reg[si].final;
+                        rmap_count++;
+                    }
+                }
+            }
+
+            /* Apply map: fix call-sites in local functions that call shared ones */
+            if (rmap_count > 0) {
+                int li;
+                for (li = 0; li < local_prog->as.program.count; li++) {
+                    ASTNode *lf = local_prog->as.program.functions[li];
+                    if (lf && lf->type == AST_FUNCTION)
+                        rename_calls_by_map(lf->as.function.body, rmap, rmap_count);
+                }
+            }
+            free(rmap); /* string pointers owned by shared_prog nodes / g_rename_reg; do not free */
+
             /* Append already-renamed nested-import functions first */
             append_program(prog, shared_prog);
             ast_free(shared_prog);

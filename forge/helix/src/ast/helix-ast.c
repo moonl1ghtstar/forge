@@ -39,6 +39,7 @@ void ast_free(ASTNode *node) {
     case AST_FUNCTION: {
         int i;
         free(node->as.function.name);
+        free(node->as.function.bare_name); /* NULL-safe */
         for (i = 0; i < node->as.function.param_count; i++)
             free(node->as.function.params[i]);
         free(node->as.function.params);
@@ -168,6 +169,7 @@ ASTNode *ast_function(char *name, char **params, int param_count, ASTNode *body,
     node->as.function.param_count = param_count;
     node->as.function.body = body;
     node->as.function.is_imported = 0; /* locally defined by default */
+    node->as.function.bare_name = NULL; /* set by rename_single_function */
     return node;
 }
 
