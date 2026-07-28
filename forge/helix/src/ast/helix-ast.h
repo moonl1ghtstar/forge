@@ -85,6 +85,7 @@ struct ASTNode {
             char **params;
             int param_count;
             ASTNode *body;
+            int is_imported; /* 1 = arrived via import (already renamed); 0 = defined locally */
         } function;
 
         /* AST_BLOCK: list of statements */

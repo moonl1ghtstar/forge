@@ -20,6 +20,33 @@ __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *hModule, 
 #define MAX_PATH 260
 #endif
 
+/* ---- Module cache (diamond-dependency deduplication) ----
+ * Records the canonical path of every project module that has already been
+ * fully parsed and appended.  Only covers is_system=0 / select_count==0
+ * imports; partial (select_count>0) and system imports are not cached here.
+ * Lifetime: one compiler invocation (static storage, never freed at exit).
+ */
+#define MODULE_CACHE_MAX 256
+static char *g_loaded_modules[MODULE_CACHE_MAX];
+static int   g_loaded_module_count = 0;
+
+/* Return 1 if `path` is already in the cache, 0 otherwise. */
+static int module_cache_contains(const char *path) {
+    int i;
+    for (i = 0; i < g_loaded_module_count; i++) {
+        if (strcmp(g_loaded_modules[i], path) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Register `path` in the cache (no-op if cache is full). */
+static void module_cache_register(const char *path) {
+    if (g_loaded_module_count >= MODULE_CACHE_MAX)
+        return; /* silently ignore overflow; module will just be reloaded */
+    g_loaded_modules[g_loaded_module_count++] = strdup(path);
+}
+
 /* ---- Internal helpers ---- */
 
 static void describe_token(const Token *tok, char *buf, size_t buf_size) {
@@ -168,6 +195,8 @@ static int peek_token_type(Parser *p, int steps, TokenType *type_out, char **lex
     token_free(&tok);
     return 0;
 }
+
+static void parse_module_body(Parser *p, ASTNode *shared_prog, ASTNode *local_prog);
 
 /* ---- Forward declarations for recursive descent ---- */
 static ASTNode *parse_function(Parser *p);
@@ -346,14 +375,58 @@ static void append_program(ASTNode *dst, ASTNode *src) {
     if (!dst || !src)
         return;
     for (i = 0; i < src->as.program.count; i++) {
-        if (src->as.program.functions[i]) {
-            program_add_function(dst, src->as.program.functions[i]);
+        ASTNode *node = src->as.program.functions[i];
+        if (node) {
+            /* Mark AST_FUNCTION nodes as imported so that the parent
+             * module's rename_module_functions() will not rename them
+             * again (they have already been renamed by their own module). */
+            if (node->type == AST_FUNCTION)
+                node->as.function.is_imported = 1;
+            program_add_function(dst, node);
             src->as.program.functions[i] = NULL;
         }
     }
     free(src->as.program.functions);
     src->as.program.functions = NULL;
     src->as.program.count = 0;
+}
+
+/*
+ * Parse a module file's top-level declarations, splitting the result:
+ *   shared_prog  <- functions/externs that arrived via nested 'import' stmts
+ *                   (already namespace-renamed; must NOT be renamed again)
+ *   local_prog   <- functions/externs/structs defined directly in this file
+ *                   (raw names; caller will rename with this module's prefix)
+ *
+ * Top-level statements (non-function code) are silently ignored for modules.
+ */
+static void parse_module_body(Parser *p, ASTNode *shared_prog, ASTNode *local_prog) {
+    while (!check(p, TOKEN_EOF)) {
+        if (match(p, TOKEN_IMPORT)) {
+            /* Nested import: load directly into shared_prog.
+             * load_module (called by parse_import_stmt) will rename
+             * those functions with their own module prefix and append
+             * them to whatever prog we pass here -- so use shared_prog. */
+            parse_import_stmt(p, shared_prog);
+        } else if (match(p, TOKEN_EXTERN)) {
+            /* Extern declarations belong to the local file. */
+            parse_extern_block(p, local_prog);
+        } else if (check(p, TOKEN_STRUCT)) {
+            ASTNode *decl = parse_struct_decl(p);
+            if (decl)
+                program_add_function(local_prog, decl);
+        } else if (check(p, TOKEN_FUNCTION)) {
+            ASTNode *func = parse_function(p);
+            if (func)
+                program_add_function(local_prog, func);
+        } else {
+            /* Top-level statements in module files are ignored.
+             * Consume one statement to avoid an infinite loop. */
+            ASTNode *stmt = parse_statement(p);
+            if (stmt)
+                ast_free(stmt);
+        }
+    }
 }
 
 static char *extract_json_string(const char *json, const char *key) {
@@ -482,12 +555,95 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
 
     if (func->type == AST_FUNCTION) {
         char *old_name = func->as.function.name;
+        fprintf(stderr, "[rename] AST_FUNCTION: %s -> %s_%s\n", old_name, ns_name, old_name);
         func->as.function.name = dup_qualified_name(ns_name, old_name);
         free(old_name);
     } else if (func->type == AST_EXTERN_FUNC) {
         char *old_name = func->as.extern_func.name;
+        fprintf(stderr, "[rename] AST_EXTERN_FUNC: %s -> %s_%s\n", old_name, ns_name, old_name);
         func->as.extern_func.name = dup_qualified_name(ns_name, old_name);
         free(old_name);
+    }
+}
+
+/*
+ * Recursively walk an AST node and rename any AST_CALL whose .name appears
+ * in `local_names` (the set of functions defined in the current module).
+ * Only locally-defined functions are renamed; stdlib/extern calls are left
+ * untouched because they are not in the set.
+ */
+static void rename_calls_in_ast(ASTNode *node, const char *ns_name,
+                                char **local_names, int local_count) {
+    int i;
+    if (!node)
+        return;
+
+    switch (node->type) {
+    case AST_CALL: {
+        /* Check if this call targets a locally-defined function */
+        for (i = 0; i < local_count; i++) {
+            if (strcmp(node->as.call.name, local_names[i]) == 0) {
+                char *old_name = node->as.call.name;
+                node->as.call.name = dup_qualified_name(ns_name, old_name);
+                free(old_name);
+                break; /* name matched and renamed; stop searching */
+            }
+        }
+        /* Recurse into arguments */
+        for (i = 0; i < node->as.call.arg_count; i++)
+            rename_calls_in_ast(node->as.call.args[i], ns_name, local_names, local_count);
+        break;
+    }
+    case AST_FUNCTION:
+        rename_calls_in_ast(node->as.function.body, ns_name, local_names, local_count);
+        break;
+    case AST_BLOCK:
+        for (i = 0; i < node->as.block.count; i++)
+            rename_calls_in_ast(node->as.block.stmts[i], ns_name, local_names, local_count);
+        break;
+    case AST_VAR_DECL:
+        rename_calls_in_ast(node->as.var_decl.init, ns_name, local_names, local_count);
+        break;
+    case AST_ASSIGN:
+        rename_calls_in_ast(node->as.assign.value, ns_name, local_names, local_count);
+        break;
+    case AST_RETURN:
+        rename_calls_in_ast(node->as.return_stmt.expr, ns_name, local_names, local_count);
+        break;
+    case AST_IF:
+        rename_calls_in_ast(node->as.if_stmt.cond, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.if_stmt.then_block, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.if_stmt.else_block, ns_name, local_names, local_count);
+        break;
+    case AST_WHILE:
+        rename_calls_in_ast(node->as.while_stmt.cond, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.while_stmt.body, ns_name, local_names, local_count);
+        break;
+    case AST_FOR:
+        rename_calls_in_ast(node->as.for_stmt.init, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.for_stmt.cond, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.for_stmt.incr, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.for_stmt.body, ns_name, local_names, local_count);
+        break;
+    case AST_DO_WHILE:
+        rename_calls_in_ast(node->as.while_stmt.cond, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.while_stmt.body, ns_name, local_names, local_count);
+        break;
+    case AST_BINARY:
+        rename_calls_in_ast(node->as.binary.left, ns_name, local_names, local_count);
+        rename_calls_in_ast(node->as.binary.right, ns_name, local_names, local_count);
+        break;
+    case AST_UNARY:
+        rename_calls_in_ast(node->as.unary.operand, ns_name, local_names, local_count);
+        break;
+    case AST_EXPR_STMT:
+        rename_calls_in_ast(node->as.expr_stmt.expr, ns_name, local_names, local_count);
+        break;
+    case AST_FIELD_ACCESS:
+        rename_calls_in_ast(node->as.field_access.object, ns_name, local_names, local_count);
+        break;
+    default:
+        break;
     }
 }
 
@@ -515,12 +671,78 @@ static void strip_module_main(ASTNode *module_prog) {
     }
 }
 
+/*
+ * Rename all locally-defined functions in `module_prog` with the module
+ * namespace prefix, then walk every function body and rename call sites
+ * that refer to those same locally-defined functions.
+ *
+ * Only AST_FUNCTION nodes that were parsed directly from this module file
+ * are considered "local".  Extern declarations and functions that were
+ * pulled in via nested imports are NOT local and must not be touched here.
+ */
 static void rename_module_functions(ASTNode *module_prog, const char *module_name) {
     if (!module_prog || module_prog->type != AST_PROGRAM)
         return;
+
+    /* --- derive namespace prefix (strip path and extension) --- */
+    const char *base = module_name;
+    const char *last_slash = strrchr(module_name, '/');
+    if (!last_slash)
+        last_slash = strrchr(module_name, '\\');
+    if (last_slash)
+        base = last_slash + 1;
+    char ns_name[256];
+    strncpy(ns_name, base, sizeof(ns_name));
+    ns_name[sizeof(ns_name) - 1] = '\0';
+    char *dot_ptr = strrchr(ns_name, '.');
+    if (dot_ptr)
+        *dot_ptr = '\0';
+
     int i;
+    int local_count = 0;
+
+    /* --- Pass 1: count locally-defined AST_FUNCTION nodes ---
+     * is_imported==1 means the function arrived via a nested import and
+     * has already been renamed; exclude it from the local set. */
     for (i = 0; i < module_prog->as.program.count; i++) {
-        rename_single_function(module_prog->as.program.functions[i], module_name);
+        ASTNode *node = module_prog->as.program.functions[i];
+        if (node && node->type == AST_FUNCTION && !node->as.function.is_imported)
+            local_count++;
+    }
+
+    /* --- Collect original names BEFORE any renaming --- */
+    char **local_names = NULL;
+    if (local_count > 0) {
+        local_names = (char **)malloc(sizeof(char *) * local_count);
+        int idx = 0;
+        for (i = 0; i < module_prog->as.program.count; i++) {
+            ASTNode *node = module_prog->as.program.functions[i];
+            if (node && node->type == AST_FUNCTION && !node->as.function.is_imported)
+                local_names[idx++] = strdup(node->as.function.name);
+        }
+    }
+
+    /* --- Pass 2: rename function definitions (AST_FUNCTION only) ---
+     * Skip is_imported==1: already renamed by their own module.
+     * Skip AST_EXTERN_FUNC: renamed when the sub-module was loaded. */
+    for (i = 0; i < module_prog->as.program.count; i++) {
+        ASTNode *node = module_prog->as.program.functions[i];
+        if (node && node->type == AST_FUNCTION && !node->as.function.is_imported)
+            rename_single_function(node, module_name);
+    }
+
+    /* --- Pass 3: rename call sites inside every function body --- */
+    if (local_count > 0) {
+        for (i = 0; i < module_prog->as.program.count; i++) {
+            ASTNode *node = module_prog->as.program.functions[i];
+            if (node && node->type == AST_FUNCTION)
+                rename_calls_in_ast(node->as.function.body, ns_name,
+                                    local_names, local_count);
+        }
+        /* free collected names */
+        for (i = 0; i < local_count; i++)
+            free(local_names[i]);
+        free(local_names);
     }
 }
 
@@ -613,7 +835,25 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             }
 
             strip_module_main(module_prog);
+            /* Only rename functions defined directly in this sub-file.
+             * parse_program() may have already loaded nested imports into
+             * module_prog; those functions are already renamed and must not
+             * be touched again.  We collect the locally-defined names
+             * BEFORE appending, then call rename_module_functions which
+             * now skips AST_EXTERN_FUNC and anything not in the local set. */
             rename_module_functions(module_prog, module_name);
+            /* rename_module_functions skips AST_EXTERN_FUNC nodes (they have
+             * no is_imported flag).  For system modules each per-function
+             * .hlx file may declare the extern itself, so we must rename it
+             * here so sema sees e.g. "console_print" not bare "print". */
+            {
+                int k;
+                for (k = 0; k < module_prog->as.program.count; k++) {
+                    ASTNode *en = module_prog->as.program.functions[k];
+                    if (en && en->type == AST_EXTERN_FUNC)
+                        rename_single_function(en, module_name);
+                }
+            }
             append_program(prog, module_prog);
             ast_free(module_prog);
             free(func_source);
@@ -628,60 +868,94 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
         }
         return 0;
     } else {
+        /* --- Diamond-dependency guard (is_system=0, select_count==0 only) ---
+         * If this exact module file has already been fully loaded during this
+         * compiler invocation, skip it entirely.  Functions from a previous
+         * load are already present (and renamed) in some ancestor prog, so
+         * loading again would produce duplicate definitions (E304). */
+        if (select_count == 0 && module_cache_contains(module_name)) {
+            fprintf(stderr, "[module_cache] skip '%s' (already loaded)\n", module_name);
+            return 0;
+        }
+
         char *project_source = read_file(module_name, is_system);
         if (!project_source) {
             forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s'", module_name);
             return 1;
         }
 
+        /* Use parse_module_body() instead of parse_program() so we can
+         * split nested-import results (already renamed) from locally-
+         * defined functions (need this module's prefix applied). */
+        ASTNode *shared_prog = ast_program(); /* nested imports land here */
+        ASTNode *local_prog  = ast_program(); /* direct definitions land here */
+
         lexer_init(&lexer, project_source);
         parser_init(&sub, &lexer);
-        module_prog = parse_program(&sub);
+        parse_module_body(&sub, shared_prog, local_prog);
         if (sub.had_error) {
             forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s': module has parse errors", module_name);
-            ast_free(module_prog);
+            ast_free(shared_prog);
+            ast_free(local_prog);
             free(project_source);
             return 1;
         }
 
         if (select_count > 0) {
             int i, j;
+            /* Validate that every requested symbol exists in local_prog */
             for (i = 0; i < select_count; i++) {
                 int found = 0;
-                for (j = 0; j < module_prog->as.program.count; j++) {
-                    ASTNode *func = module_prog->as.program.functions[j];
-                    if (func && func->type == AST_FUNCTION && strcmp(func->as.function.name, select_funcs[i]) == 0) {
+                for (j = 0; j < local_prog->as.program.count; j++) {
+                    ASTNode *func = local_prog->as.program.functions[j];
+                    if (func && func->type == AST_FUNCTION &&
+                        strcmp(func->as.function.name, select_funcs[i]) == 0) {
                         found = 1;
                         break;
                     }
                 }
                 if (!found) {
                     forge_report_error(SEV_ERROR, "E602", p->current.line, p->current.col, NULL, NULL, "symbol '%s' was not found in module '%s'", select_funcs[i], module_name);
-                    ast_free(module_prog);
+                    ast_free(shared_prog);
+                    ast_free(local_prog);
                     free(project_source);
                     return 1;
                 }
             }
 
+            /* First: append already-renamed shared functions */
+            append_program(prog, shared_prog);
+            ast_free(shared_prog);
+
+            /* Then: rename and append only the selected local functions */
             for (i = 0; i < select_count; i++) {
-                for (j = 0; j < module_prog->as.program.count; j++) {
-                    ASTNode *func = module_prog->as.program.functions[j];
-                    if (func && func->type == AST_FUNCTION && strcmp(func->as.function.name, select_funcs[i]) == 0) {
+                for (j = 0; j < local_prog->as.program.count; j++) {
+                    ASTNode *func = local_prog->as.program.functions[j];
+                    if (func && func->type == AST_FUNCTION &&
+                        strcmp(func->as.function.name, select_funcs[i]) == 0) {
                         rename_single_function(func, module_name);
                         program_add_function(prog, func);
-                        module_prog->as.program.functions[j] = NULL;
+                        local_prog->as.program.functions[j] = NULL;
                     }
                 }
             }
-            ast_free(module_prog);
+            ast_free(local_prog);
             free(project_source);
             return 0;
         } else {
-            strip_module_main(module_prog);
-            rename_module_functions(module_prog, module_name);
-            append_program(prog, module_prog);
-            ast_free(module_prog);
+            /* Append already-renamed nested-import functions first */
+            append_program(prog, shared_prog);
+            ast_free(shared_prog);
+
+            /* Rename local definitions and append them */
+            rename_module_functions(local_prog, module_name);
+            append_program(prog, local_prog);
+            ast_free(local_prog);
             free(project_source);
+
+            /* Register in cache so subsequent imports of this module are
+             * skipped (diamond-dependency deduplication). */
+            module_cache_register(module_name);
             return 0;
         }
     }

@@ -167,6 +167,7 @@ ASTNode *ast_function(char *name, char **params, int param_count, ASTNode *body,
     node->as.function.params = params;
     node->as.function.param_count = param_count;
     node->as.function.body = body;
+    node->as.function.is_imported = 0; /* locally defined by default */
     return node;
 }
 
