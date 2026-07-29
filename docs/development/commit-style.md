@@ -176,7 +176,7 @@ Common Forge scopes:
 | `assembler` | Built-in assembler |
 | `coff` | COFF object writer |
 | `linker` | Linking system |
-| `cli` | Command-line interface |
+| `cli` | Command-line interface(main.c) |
 | `module` | Built-in modules |
 | `docs` | Documentation |
 | `build` | Build system |
