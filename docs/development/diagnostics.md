@@ -1,5 +1,5 @@
 
-# Error Msgs Forms:
+# Forge Diagnostics Specification
 ```
 <LEVEL>[<ERR_CODE>]: <ERR_MSG>
  --> <FILE_NAME>:<LINE>:<COLUMN>
@@ -41,9 +41,9 @@
   
 | Code | Error Message              | Description                                                    |
 | ---- | -------------------------- | -------------------------------------------------------------- |
-| E001 | unexpected character: '%c' | An invalid character was encountered.                          |
-| E002 | unterminated block comment | A `/* ... */` comment reached EOF before being closed.         |
-| E003 | invalid numeric literal    | Malformed number, overflow, or invalid characters in a number. |
+| E101 | unexpected character: '%c' | An invalid character was encountered.                          |
+| E102 | unterminated block comment | A `/* ... */` comment reached EOF before being closed.         |
+| E103 | invalid numeric literal    | Malformed number, overflow, or invalid characters in a number. |
   
 ### 200 Series – Syntax Errors (Parser)  
   
@@ -77,7 +77,7 @@
 | E403 | invalid operand types for '%s'           | The operator does not support the given operand types. |
 | E404 | cannot convert '%s' to '%s'              | Invalid implicit or explicit conversion.               |
   
-## 500 Series – User-Defined Type Errors  
+### 500 Series – User-Defined Type Errors  
   
 Description: Errors related to user-defined types such as `struct`, `class`, `enum`, and other custom types.  
   
