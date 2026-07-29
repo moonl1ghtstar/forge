@@ -24,6 +24,8 @@ static void enable_ansi_colors(void) { /* no-op */ }
 #define COLOR_CYAN    "\033[1;36m"
 #define COLOR_RESET   "\033[0m"
 
+int g_debug = 0;
+
 static char *current_path = NULL;
 static char *current_source = NULL;
 

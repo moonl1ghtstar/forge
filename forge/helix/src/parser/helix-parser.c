@@ -30,6 +30,31 @@ __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *hModule, 
 static char *g_loaded_modules[MODULE_CACHE_MAX];
 static int   g_loaded_module_count = 0;
 
+/* ---- Module loading stack (circular-dependency detection) ----
+ * Tracks modules currently being loaded.  If a module re-enters load_module
+ * while already on this stack, a circular dependency is detected (E603).
+ */
+#define LOADING_STACK_MAX 64
+static char *g_loading_stack[LOADING_STACK_MAX];
+static int   g_loading_stack_count = 0;
+
+static int loading_stack_push(const char *path) {
+    int i;
+    for (i = 0; i < g_loading_stack_count; i++) {
+        if (strcmp(g_loading_stack[i], path) == 0)
+            return 0;
+    }
+    if (g_loading_stack_count >= LOADING_STACK_MAX)
+        return 1;
+    g_loading_stack[g_loading_stack_count++] = (char *)path;
+    return 1;
+}
+
+static void loading_stack_pop(void) {
+    if (g_loading_stack_count > 0)
+        g_loading_stack_count--;
+}
+
 /* Return 1 if `path` is already in the cache, 0 otherwise. */
 static int module_cache_contains(const char *path) {
     int i;
@@ -104,9 +129,11 @@ static void parse_error(Parser *p, const char *msg) {
     int err_col = p->current.col;
 
     if (p->current.type == TOKEN_ERROR) {
-        err_code = "E001";
+        err_code = "E101";
         if (p->current.lexeme && strstr(p->current.lexeme, "unterminated string literal")) {
-            err_code = "E002";
+            err_code = "E102";
+        } else if (p->current.lexeme && strstr(p->current.lexeme, "invalid numeric literal")) {
+            err_code = "E103";
         }
         forge_report_error(SEV_ERROR, err_code, err_line, err_col, NULL, NULL, "%s", p->current.lexeme ? p->current.lexeme : msg);
     } else {
@@ -635,7 +662,7 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
 
     if (func->type == AST_FUNCTION) {
         char *old_name = func->as.function.name;
-        fprintf(stderr, "[rename] AST_FUNCTION: %s -> %s_%s\n", old_name, ns_name, old_name);
+        DEBUG_PRINT("[rename] AST_FUNCTION: %s -> %s_%s\n", old_name, ns_name, old_name);
         /* Save bare (pre-rename) name so rename_calls_by_map can match it */
         if (!func->as.function.bare_name)
             func->as.function.bare_name = strdup(old_name);
@@ -645,7 +672,7 @@ static void rename_single_function(ASTNode *func, const char *module_name) {
         free(old_name);
     } else if (func->type == AST_EXTERN_FUNC) {
         char *old_name = func->as.extern_func.name;
-        fprintf(stderr, "[rename] AST_EXTERN_FUNC: %s -> %s_%s\n", old_name, ns_name, old_name);
+        DEBUG_PRINT("[rename] AST_EXTERN_FUNC: %s -> %s_%s\n", old_name, ns_name, old_name);
         /* Preserve original linker symbol before rename */
         if (!func->as.extern_func.link_name)
             func->as.extern_func.link_name = strdup(old_name);
@@ -756,7 +783,7 @@ static void rename_calls_by_map(ASTNode *node,
             if (strcmp(node->as.call.name, map[k].bare_name) == 0) {
                 char *old = node->as.call.name;
                 node->as.call.name = strdup(map[k].final_name);
-                fprintf(stderr, "[rename_map] call %s -> %s\n", old, node->as.call.name);
+                DEBUG_PRINT("[rename_map] call %s -> %s\n", old, node->as.call.name);
                 free(old);
                 break;
             }
@@ -1054,19 +1081,28 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
         }
         return 0;
     } else {
+        /* --- Circular-dependency guard ---
+         * If this module is already on the loading stack, a cycle exists. */
+        if (!loading_stack_push(module_name)) {
+            forge_report_error(SEV_ERROR, "E603", p->current.line, p->current.col, NULL, NULL, "circular module dependency detected: '%s' imports itself transitively", module_name);
+            return 1;
+        }
+
         /* --- Diamond-dependency guard (is_system=0, select_count==0 only) ---
          * If this exact module file has already been fully loaded during this
          * compiler invocation, skip it entirely.  Functions from a previous
          * load are already present (and renamed) in some ancestor prog, so
          * loading again would produce duplicate definitions (E304). */
         if (select_count == 0 && module_cache_contains(module_name)) {
-            fprintf(stderr, "[module_cache] skip '%s' (already loaded)\n", module_name);
+            DEBUG_PRINT("[module_cache] skip '%s' (already loaded)\n", module_name);
+            loading_stack_pop();
             return 0;
         }
 
         char *project_source = read_file(module_name, is_system);
         if (!project_source) {
             forge_report_error(SEV_ERROR, "E601", p->current.line, p->current.col, NULL, NULL, "failed to import module '%s'", module_name);
+            loading_stack_pop();
             return 1;
         }
 
@@ -1084,6 +1120,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             ast_free(shared_prog);
             ast_free(local_prog);
             free(project_source);
+            loading_stack_pop();
             return 1;
         }
 
@@ -1105,6 +1142,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
                     ast_free(shared_prog);
                     ast_free(local_prog);
                     free(project_source);
+                    loading_stack_pop();
                     return 1;
                 }
             }
@@ -1203,6 +1241,7 @@ static int load_module(Parser *p, ASTNode *prog, const char *module_name, int is
             /* Register in cache so subsequent imports of this module are
              * skipped (diamond-dependency deduplication). */
             module_cache_register(module_name);
+            loading_stack_pop();
             return 0;
         }
     }

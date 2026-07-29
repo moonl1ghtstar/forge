@@ -111,6 +111,7 @@ static void usage(const char *progname, int exit_code) {
     fprintf(stderr, "  -dump-tokens  Print lexer tokens and exit\n");
     fprintf(stderr, "  -dump-ast     Print parsed AST and exit\n");
     fprintf(stderr, "  -dump-ir      Print lowered IR and exit\n");
+    fprintf(stderr, "  --debug, -v   Enable debug output (developer diagnostics)\n");
     fprintf(stderr, "\nPipeline:  source -> forge -> .asm -> forge assembler -> .obj -> ld -> .exe\n");
     fprintf(stderr, "Cross-obj: forge src.hlx -obj && gcc -c lib.c -o lib.obj && "
                     "forge -link src.obj lib.obj -o out.exe\n");
@@ -217,7 +218,7 @@ static char *short_path_dup(const char *path) {
     unsigned long n = GetShortPathNameA(path, buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf))
         return strdup(buf);
-        
+
     /* If failed (e.g. file does not exist yet), try getting short path of parent directory */
     char dir[1024];
     int res = snprintf(dir, sizeof(dir), "%s", path);
@@ -276,17 +277,14 @@ static int is_absolute_path(const char *path) {
 }
 
 static void safe_remove(const char *path, int verbose) {
+    (void)verbose;
     if (path && path[0] != '\0') {
         if (remove(path) != 0) {
             if (errno != ENOENT) {
-                if (verbose) {
-                    fprintf(stderr, "[Forge] debug: failed to delete temporary file '%s': %s\n", path, strerror(errno));
-                }
+                DEBUG_PRINT("[Forge] debug: failed to delete temporary file '%s': %s\n", path, strerror(errno));
             }
         } else {
-            if (verbose) {
-                fprintf(stderr, "[Forge] deleted temp file: %s\n", path);
-            }
+            DEBUG_PRINT("[Forge] deleted temp file: %s\n", path);
         }
     }
 }
@@ -622,7 +620,7 @@ static int compile_helix(const char *source_path, const char *asm_path) {
 
     out = fopen(asm_path, "w");
     if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", asm_path);
+        forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot open '%s'", asm_path);
         ir_program_free(ir);
         ast_free(program);
         return 1;
@@ -897,16 +895,12 @@ static void perform_cleanup(void) {
     if (g_build_ctx.temp_dir[0] != '\0') {
 #ifdef _WIN32
         if (RemoveDirectoryA(g_build_ctx.temp_dir) != 0) {
-            if (g_build_ctx.verbose) {
-                fprintf(stderr, "[Forge] removed temp directory: %s\n", g_build_ctx.temp_dir);
-            }
+            DEBUG_PRINT("[Forge] removed temp directory: %s\n", g_build_ctx.temp_dir);
             g_build_ctx.temp_dir[0] = '\0';
         } else {
             unsigned long err = GetLastError();
             if (err != 2 && err != 3) {
-                if (g_build_ctx.verbose) {
-                    fprintf(stderr, "[Forge] debug: failed to remove temp directory '%s' (Error %lu)\n", g_build_ctx.temp_dir, err);
-                }
+                DEBUG_PRINT("[Forge] debug: failed to remove temp directory '%s' (Error %lu)\n", g_build_ctx.temp_dir, err);
             }
         }
 #else
@@ -949,15 +943,18 @@ int main(int argc, char *argv[]) {
     atexit(perform_cleanup);
     signal(SIGINT, handle_signal);
 
-    /* Pre-scan for -verbose flag */
+    /* Pre-scan for -verbose/--debug/-v flag */
     for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-verbose") == 0) {
+        if (strcmp(argv[i], "-verbose") == 0 ||
+            strcmp(argv[i], "--debug") == 0 ||
+            strcmp(argv[i], "-v") == 0) {
             verbose = 1;
             break;
         }
     }
 
     g_build_ctx.verbose = verbose;
+    g_debug = verbose;
 
 #ifdef _WIN32
     {
@@ -971,14 +968,14 @@ int main(int argc, char *argv[]) {
             temp_base[len - 1] = '\0';
             len--;
         }
-        
+
         char base_work_dir[1024];
         int res = snprintf(base_work_dir, sizeof(base_work_dir), "%s\\forge-work", temp_base);
         if (res < 0 || res >= (int)sizeof(base_work_dir)) {
             fprintf(stderr, "Forge error: path too long\n");
             return 1;
         }
-        
+
         if (!CreateDirectoryA(base_work_dir, NULL)) {
             unsigned long err = GetLastError();
             if (err != 183) { /* 183 is ERROR_ALREADY_EXISTS */
@@ -986,18 +983,18 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
         }
-        
+
         int pid = _getpid();
         res = snprintf(g_build_ctx.temp_dir, sizeof(g_build_ctx.temp_dir), "%s\\%d", base_work_dir, pid);
         if (res < 0 || res >= (int)sizeof(g_build_ctx.temp_dir)) {
             fprintf(stderr, "Forge error: path too long\n");
             return 1;
         }
-        
+
         if (verbose) {
-            fprintf(stderr, "[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
+            DEBUG_PRINT("[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
         }
-        
+
         if (!CreateDirectoryA(g_build_ctx.temp_dir, NULL)) {
             unsigned long err = GetLastError();
             if (err != 183) { /* 183 is ERROR_ALREADY_EXISTS */
@@ -1005,7 +1002,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
         }
-        
+
         int res1 = snprintf(g_build_ctx.asm_path, sizeof(g_build_ctx.asm_path), "%s\\forge-build.asm", g_build_ctx.temp_dir);
         int res2 = snprintf(g_build_ctx.obj_path, sizeof(g_build_ctx.obj_path), "%s\\forge-build.o", g_build_ctx.temp_dir);
         int res3 = snprintf(g_build_ctx.exe_path, sizeof(g_build_ctx.exe_path), "%s\\forge-build.exe", g_build_ctx.temp_dir);
@@ -1035,7 +1032,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (verbose) {
-        fprintf(stderr, "[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
+        DEBUG_PRINT("[Forge] temp directory:\n%s\n\n", g_build_ctx.temp_dir);
     }
 #endif
 
@@ -1081,7 +1078,9 @@ int main(int argc, char *argv[]) {
                 output_path = argv[++i];
             } else if (strcmp(argv[i], "-run") == 0) {
                 do_run = 1;
-            } else if (strcmp(argv[i], "-verbose") == 0) {
+            } else if (strcmp(argv[i], "-verbose") == 0 ||
+                       strcmp(argv[i], "--debug") == 0 ||
+                       strcmp(argv[i], "-v") == 0) {
                 /* already handled */
             } else {
                 fprintf(stderr, "Forge error: unexpected argument '%s' in -link mode\n", argv[i]);
@@ -1107,24 +1106,23 @@ int main(int argc, char *argv[]) {
         }
 
         if (verbose) {
-            fprintf(stderr, "[Forge] linking:\n");
+            DEBUG_PRINT("[Forge] linking:\n");
             for (i = 0; i < link_obj_count; i++) {
-                fprintf(stderr, "  %s\n", link_objs[i]);
+                DEBUG_PRINT("  %s\n", link_objs[i]);
             }
-            fprintf(stderr, "\n");
+            DEBUG_PRINT("\n");
         }
 
         result = link_executable(link_objs, link_obj_count, g_build_ctx.exe_path);
         if (result != 0)
             goto cleanup;
 
-        fprintf(stderr,
-            "[Forge debug] copy source='%s' destination='%s'\n",
-            g_build_ctx.exe_path ? g_build_ctx.exe_path : "(null)",
-            output_path ? output_path : "(null)"
-        );
+        DEBUG_PRINT(
+                "[Forge debug] copy source='%s' destination='%s'\n",
+                g_build_ctx.exe_path[0] ? g_build_ctx.exe_path : "(empty)",
+                output_path ? output_path : "(null)");
         if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
-            fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
+            forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot write '%s'", output_path);
             result = 1;
             goto cleanup;
         }
@@ -1155,7 +1153,9 @@ int main(int argc, char *argv[]) {
             dump_ast = 1;
         } else if (strcmp(argv[i], "-dump-ir") == 0) {
             dump_ir = 1;
-        } else if (strcmp(argv[i], "-verbose") == 0) {
+        } else if (strcmp(argv[i], "-verbose") == 0 ||
+                   strcmp(argv[i], "--debug") == 0 ||
+                   strcmp(argv[i], "-v") == 0) {
             /* already handled */
         } else {
             fprintf(stderr, "Forge error: unexpected argument '%s'\n", argv[i]);
@@ -1215,11 +1215,10 @@ int main(int argc, char *argv[]) {
         const char *dot = strrchr(source_path, '.');
         if (dot && strcmp(dot, ".asm") == 0) {
             /* Input is already assembly; copy it */
-            fprintf(stderr,
-                "[Forge debug] copy source='%s' destination='%s'\n",
-                source_path ? source_path : "(null)",
-                output_path ? output_path : "(null)"
-            );
+            DEBUG_PRINT(
+                    "[Forge debug] copy source='%s' destination='%s'\n",
+                    source_path ? source_path : "(null)",
+                    output_path ? output_path : "(null)");
             result = copy_file_bytes(source_path, output_path);
         } else {
             result = compile_source_to_asm(source_path, output_path, 0);
@@ -1243,10 +1242,13 @@ int main(int argc, char *argv[]) {
             }
             if (verbose) {
                 const char *fname = strrchr(source_path, '\\');
-                if (!fname) fname = strrchr(source_path, '/');
-                if (fname) fname++;
-                else fname = source_path;
-                fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+                if (!fname)
+                    fname = strrchr(source_path, '/');
+                if (fname)
+                    fname++;
+                else
+                    fname = source_path;
+                DEBUG_PRINT("[Forge] assembling:\n%s\n\n", fname);
             }
             result = assemble_object(source_path, g_build_ctx.obj_path);
         } else {
@@ -1266,23 +1268,25 @@ int main(int argc, char *argv[]) {
             }
             if (verbose) {
                 const char *fname = strrchr(g_build_ctx.asm_path, '\\');
-                if (!fname) fname = strrchr(g_build_ctx.asm_path, '/');
-                if (fname) fname++;
-                else fname = g_build_ctx.asm_path;
-                fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+                if (!fname)
+                    fname = strrchr(g_build_ctx.asm_path, '/');
+                if (fname)
+                    fname++;
+                else
+                    fname = g_build_ctx.asm_path;
+                DEBUG_PRINT("[Forge] assembling:\n%s\n\n", fname);
             }
             result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
         }
         if (result != 0)
             goto cleanup;
 
-        fprintf(stderr,
-            "[Forge debug] copy source='%s' destination='%s'\n",
-            g_build_ctx.obj_path ? g_build_ctx.obj_path : "(null)",
-            output_path ? output_path : "(null)"
-        );
+        DEBUG_PRINT(
+                "[Forge debug] copy source='%s' destination='%s'\n",
+                g_build_ctx.obj_path[0] ? g_build_ctx.obj_path : "(empty)",
+                output_path ? output_path : "(null)");
         if (copy_file_bytes(g_build_ctx.obj_path, output_path) != 0) {
-            fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
+            forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot write '%s'", output_path);
             result = 1;
             goto cleanup;
         }
@@ -1305,10 +1309,13 @@ int main(int argc, char *argv[]) {
         }
         if (verbose) {
             const char *fname = strrchr(source_path, '\\');
-            if (!fname) fname = strrchr(source_path, '/');
-            if (fname) fname++;
-            else fname = source_path;
-            fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+            if (!fname)
+                fname = strrchr(source_path, '/');
+            if (fname)
+                fname++;
+            else
+                fname = source_path;
+            DEBUG_PRINT("[Forge] assembling:\n%s\n\n", fname);
         }
         result = assemble_object(source_path, g_build_ctx.obj_path);
     } else {
@@ -1328,10 +1335,13 @@ int main(int argc, char *argv[]) {
         }
         if (verbose) {
             const char *fname = strrchr(g_build_ctx.asm_path, '\\');
-            if (!fname) fname = strrchr(g_build_ctx.asm_path, '/');
-            if (fname) fname++;
-            else fname = g_build_ctx.asm_path;
-            fprintf(stderr, "[Forge] assembling:\n%s\n\n", fname);
+            if (!fname)
+                fname = strrchr(g_build_ctx.asm_path, '/');
+            if (fname)
+                fname++;
+            else
+                fname = g_build_ctx.asm_path;
+            DEBUG_PRINT("[Forge] assembling:\n%s\n\n", fname);
         }
         result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
     }
@@ -1347,23 +1357,25 @@ int main(int argc, char *argv[]) {
         }
         if (verbose) {
             const char *fname = strrchr(g_build_ctx.obj_path, '\\');
-            if (!fname) fname = strrchr(g_build_ctx.obj_path, '/');
-            if (fname) fname++;
-            else fname = g_build_ctx.obj_path;
-            fprintf(stderr, "[Forge] linking:\n%s\n\n", fname);
+            if (!fname)
+                fname = strrchr(g_build_ctx.obj_path, '/');
+            if (fname)
+                fname++;
+            else
+                fname = g_build_ctx.obj_path;
+            DEBUG_PRINT("[Forge] linking:\n%s\n\n", fname);
         }
         result = link_executable(objs, 1, g_build_ctx.exe_path);
     }
     if (result != 0)
         goto cleanup;
 
-    fprintf(stderr,
-        "[Forge debug] copy source='%s' destination='%s'\n",
-        g_build_ctx.exe_path ? g_build_ctx.exe_path : "(null)",
-        output_path ? output_path : "(null)"
-    );
+    DEBUG_PRINT(
+            "[Forge debug] copy source='%s' destination='%s'\n",
+            g_build_ctx.exe_path[0] ? g_build_ctx.exe_path : "(empty)",
+            output_path ? output_path : "(null)");
     if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
-        fprintf(stderr, "Forge error: failed to write '%s'\n", output_path);
+        forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot write '%s'", output_path);
         result = 1;
         goto cleanup;
     }

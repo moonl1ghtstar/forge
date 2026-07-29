@@ -1,10 +1,20 @@
 #ifndef FORGE_ERRORS_H
 #define FORGE_ERRORS_H
 
+#include <stdio.h>
+
 typedef enum {
     SEV_ERROR,
     SEV_WARN
 } Severity;
+
+extern int g_debug;
+
+#define DEBUG_PRINT(...) \
+    do { \
+        if (g_debug) \
+            fprintf(stderr, __VA_ARGS__); \
+    } while (0)
 
 /* Store global file context to print the line/pointer */
 void forge_set_current_file(const char *path, const char *source);
