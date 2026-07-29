@@ -171,6 +171,8 @@ static Token read_number(Lexer *lex) {
     if (peek(lex) == '0' && (peek_next(lex) == 'x' || peek_next(lex) == 'X')) {
         advance(lex);
         advance(lex);
+        if (!isxdigit((unsigned char)peek(lex)))
+            return error_token("invalid numeric literal: no hex digits after 0x", line, col);
         base = 16;
         start = lex->pos;
         while (isxdigit((unsigned char)peek(lex)))

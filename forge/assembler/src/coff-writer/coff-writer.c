@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "coff-writer.h"
+#include "forge-errors.h"
 
 /* Structure packing to match file format exactly */
 #pragma pack(push, 1)
@@ -71,7 +72,7 @@ int coff_write_object(const char *output_path,
                       int symbol_count) {
     FILE *f = fopen(output_path, "wb");
     if (!f) {
-        fprintf(stderr, "forge-coff: cannot open output file '%s'\n", output_path);
+        forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot open '%s'", output_path);
         return 1;
     }
 

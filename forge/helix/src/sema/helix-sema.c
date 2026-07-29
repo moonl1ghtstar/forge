@@ -123,6 +123,10 @@ static void sema_error(SemaCtx *ctx, int line, const char *fmt, ...) {
     else if (strstr(msg, "initialized more than once")) err_code = "E505";
     else if (strstr(msg, "field value(s)")) err_code = "E506";
     else if (strstr(msg, "member access")) err_code = "E508";
+    else if (strstr(msg, "cannot convert")) err_code = "E404";
+    else if (strstr(msg, "missing initializer")) err_code = "E504";
+    else if (strstr(msg, "cannot be instantiated")) err_code = "E507";
+    else if (strstr(msg, "recursive type")) err_code = "E509";
 
     forge_report_error(SEV_ERROR, err_code, line, col, NULL, NULL, "%s", msg);
     ctx->had_error = 1;

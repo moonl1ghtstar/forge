@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ir.h"
+#include "../errors/forge-errors.h"
 
 static char *ir_strdup(const char *s) {
     return s ? strdup(s) : NULL;
@@ -54,7 +55,7 @@ IRValue ir_value_local(int local_index, int is_string) {
 IRProgram *ir_program_new(void) {
     IRProgram *program = (IRProgram *)calloc(1, sizeof(IRProgram));
     if (!program) {
-        fprintf(stderr, "Forge error: out of memory\n");
+        forge_report_error(SEV_ERROR, "E901", 0, 0, NULL, NULL, "internal compiler error: memory allocation failed");
         exit(1);
     }
     return program;
@@ -117,7 +118,7 @@ void ir_program_free(IRProgram *program) {
 IRFunction *ir_function_new(const char *name, int is_extern) {
     IRFunction *func = (IRFunction *)calloc(1, sizeof(IRFunction));
     if (!func) {
-        fprintf(stderr, "Forge error: out of memory\n");
+        forge_report_error(SEV_ERROR, "E901", 0, 0, NULL, NULL, "internal compiler error: memory allocation failed");
         exit(1);
     }
     func->name = ir_strdup(name);

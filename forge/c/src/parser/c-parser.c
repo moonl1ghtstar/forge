@@ -11,7 +11,7 @@
 static void c_parse_error(CParser *p, const char *msg) {
     const char *err_code = "E201";
     if (p->current.type == C_TOK_ERROR) {
-        err_code = "E001";
+        err_code = "E101";
         forge_report_error(SEV_ERROR, err_code, p->current.line, p->current.col, NULL, NULL, "%s", p->current.lexeme ? p->current.lexeme : msg);
     } else {
         if (strstr(msg, "expected ')'")) err_code = "E203";

@@ -31,7 +31,7 @@ static char *read_file(const char *path) {
 
     buf = (char *)malloc(size + 1);
     if (!buf) {
-        fprintf(stderr, "Forge error: out of memory reading '%s'\n", path);
+        forge_report_error(SEV_ERROR, "E901", 0, 0, NULL, NULL, "internal compiler error: memory allocation failed reading '%s'", path);
         fclose(f);
         return NULL;
     }
@@ -130,7 +130,7 @@ int compile_c(const char *source_path, const char *output_path) {
 
     out = fopen(output_path, "w");
     if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+        forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot open '%s'", output_path);
         ir_program_free(ir);
         ast_free(program);
         return 1;
@@ -182,7 +182,7 @@ int compile_c_lib(const char *source_path, const char *output_path) {
 
     out = fopen(output_path, "w");
     if (!out) {
-        fprintf(stderr, "Forge error: cannot open output file '%s'\n", output_path);
+        forge_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot open '%s'", output_path);
         ir_program_free(ir);
         ast_free(program);
         return 1;

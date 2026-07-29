@@ -9,12 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "helix-ast.h"
+#include "../errors/forge-errors.h"
 
 /* Allocate and zero-initialize a new AST node */
 ASTNode *ast_new(ASTNodeType type, int line) {
     ASTNode *node = (ASTNode *)calloc(1, sizeof(ASTNode));
     if (!node) {
-        fprintf(stderr, "Forge error: out of memory\n");
+        forge_report_error(SEV_ERROR, "E901", 0, 0, NULL, NULL, "internal compiler error: memory allocation failed");
         exit(1);
     }
     node->type = type;
