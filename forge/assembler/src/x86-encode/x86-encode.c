@@ -29,8 +29,8 @@
 
 /* ---- Helpers ---- */
 
-static int fits_imm8(long v) { return v >= -128 && v <= 127; }
-static int fits_imm32(long v) { return v >= INT32_MIN && v <= INT32_MAX; }
+static int fits_imm8(long long v) { return v >= -128 && v <= 127; }
+static int fits_imm32(long long v) { return v >= INT32_MIN && v <= INT32_MAX; }
 
 /* Emit one byte into buf[n], return 0 on overflow */
 #define EMIT(b)                  \
@@ -269,7 +269,7 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     /* MOV reg, imm */
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_IMM) {
-        long val = src->imm_val;
+        long long val = src->imm_val;
         int W = (dst->reg_size == 64);
         if (W) {
             /* Use REX.W C7 /0 imm32 (sign-extends) for values fitting int32 */
@@ -361,6 +361,58 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
     return -1;
 }
 
+/* MOVSD xmm, [mem] — scalar double load */
+static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
+                        uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG || dst->reg_size != 128) {
+        fprintf(stderr, "forge-asm: line %d: MOVSD requires XMM destination\n", stmt->line);
+        return -1;
+    }
+    if (src->kind == ASMOP_MEM) {
+        uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, 0);
+        if (rex != 0x40)
+            EMIT(rex);
+        EMIT(0xF2);
+        EMIT(0x0F);
+        EMIT(0x10);
+        if (src->mem.kind == MEMKIND_RIP_REL) {
+            EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5);
+            uint32_t rel_off = ctx->section_offset + n;
+            x86_add_reloc(ctx, rel_off, src->mem.symbol);
+            EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+        } else {
+            if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
+                return -1;
+        }
+        return n;
+    }
+    fprintf(stderr, "forge-asm: line %d: MOVSD requires [mem] source\n", stmt->line);
+    return -1;
+}
+
+/* XORPD xmm, xmm — zero XMM register */
+static int encode_xorpd(const AsmStatement *stmt, uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG || dst->reg_size != 128 ||
+        src->kind != ASMOP_REG || src->reg_size != 128) {
+        fprintf(stderr, "forge-asm: line %d: XORPD requires two XMM registers\n", stmt->line);
+        return -1;
+    }
+    uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
+    if (rex != 0x40)
+        EMIT(rex);
+    EMIT(0x66);
+    EMIT(0x0F);
+    EMIT(0x57);
+    EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    return n;
+}
+
 static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
                       uint8_t *buf, int buf_size) {
     int n = 0;
@@ -396,7 +448,7 @@ static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
 /* ADD / SUB / CMP / AND / OR / XOR (ALU ops) */
 static int encode_alu_regimm(uint8_t *buf, int *n_ptr, int buf_size,
-                             int W, int rm_reg, int opext, long imm) {
+                             int W, int rm_reg, int opext, long long imm) {
     int n = *n_ptr;
     /* opext: 0=ADD,1=OR,4=AND,5=SUB,6=XOR,7=CMP */
     uint8_t rex = REX(W, 0, 0, REGHI(rm_reg));
@@ -593,7 +645,7 @@ static int encode_push(const AsmStatement *stmt,
         return n;
     }
     if (op->kind == ASMOP_IMM) {
-        long v = op->imm_val;
+        long long v = op->imm_val;
         if (fits_imm8(v)) {
             EMIT(0x6A);
             EMIT((uint8_t)(v & 0xFF));
@@ -823,6 +875,10 @@ int x86_encode(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     if (strcmp(m, "mov") == 0)
         return encode_mov(ctx, stmt, buf, buf_size);
+    if (strcmp(m, "movsd") == 0)
+        return encode_movsd(ctx, stmt, buf, buf_size);
+    if (strcmp(m, "xorpd") == 0)
+        return encode_xorpd(stmt, buf, buf_size);
     if (strcmp(m, "lea") == 0)
         return encode_lea(ctx, stmt, buf, buf_size);
 

@@ -38,7 +38,7 @@ static AsmToken make_tok1(AsmTokenType type, int line, int col) {
 }
 
 static AsmToken make_tok_str(AsmTokenType type, const char *text,
-                              long value, int line, int col) {
+                              long long value, int line, int col) {
     AsmToken t;
     t.type  = type;
     t.text  = strdup(text);
@@ -115,9 +115,9 @@ static AsmToken read_number(AsmLexer *lex, int line, int col) {
     }
     buf[len] = '\0';
 
-    long value = strtol(buf, NULL, base);
+    long long value = strtoll(buf, NULL, base);
     char disp[32];
-    snprintf(disp, sizeof(disp), "%ld", value);
+    snprintf(disp, sizeof(disp), "%lld", value);
     free(buf);
 
     return make_tok_str(ASM_TOK_NUMBER, disp, value, line, col);

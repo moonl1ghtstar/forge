@@ -44,7 +44,7 @@ typedef struct {
     int  reg_idx;    /* 0-15 */
     int  reg_size;   /* 64, 32, 16, 8 */
     /* IMM */
-    long imm_val;
+    long long imm_val;
     /* MEM */
     AsmMemOp mem;
     /* LABEL */

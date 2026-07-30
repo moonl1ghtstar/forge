@@ -29,7 +29,7 @@ typedef enum {
 typedef struct {
     AsmTokenType type;
     char        *text;  /* heap-allocated copy; call asm_token_free() when done */
-    long         value; /* numeric value for ASM_TOK_NUMBER */
+    long long    value; /* numeric value for ASM_TOK_NUMBER */
     int          line;
     int          col;
 } AsmToken;
