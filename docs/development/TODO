@@ -1,0 +1,14 @@
+TODO List
+
+- 1. 문서 파일들 작성하기
+
+- 2. 콘솔 모듈 WinAPI를 직접 실행하는 방식으로 바꾸기
+    > clear.hlx:
+    ```
+    필요 win32 api 기능:
+    GetStdHandle (이미 있음)
+    GetConsoleScreenBufferInfo
+    FillConsoleOutputCharacterA
+    FillConsoleOutputAttribute
+    SetConsoleCursorPosition
+    ```
