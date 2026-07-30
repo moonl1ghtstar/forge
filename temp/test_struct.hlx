@@ -1,0 +1,10 @@
+import console
+
+struct StructName {
+    let a;
+    let b;
+}
+
+StructName value { 1, 2 };
+
+console.print(value.a);

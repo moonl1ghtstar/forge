@@ -1,0 +1,14 @@
+import console
+
+struct StructName {
+    let a;
+    let b;
+}
+
+StructName value {1,2};
+
+if (value.a == 1) {
+    console.print("OK");
+} else {
+    console.print("FAIL");
+}

@@ -1,0 +1,17 @@
+import console
+
+console.print("Hello");
+console.print(123);
+console.print(123456789L);
+console.print(true);
+
+let a = 10;
+console.print(a);
+
+struct Point {
+    let x;
+}
+
+Point p { 5 };
+
+console.print(p.x);

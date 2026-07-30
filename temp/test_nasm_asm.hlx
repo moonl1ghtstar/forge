@@ -1,0 +1,5 @@
+import console
+console.print(123);
+console.print(123456789L);
+console.print(true);
+console.print(3.14);
