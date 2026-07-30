@@ -17,15 +17,11 @@
         "input": {
             "link": "console_input"
         },
-        "print": {
-            "link": "console_print"
-        }
     },
     "funcs": [
         "clear",
         "color",
-        "input",
-        "print"
+        "input"
     ],
     "event": {
         "enabled": false,
