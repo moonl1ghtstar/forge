@@ -313,10 +313,16 @@ static const char *ast_type_name(ASTNodeType type) {
         return "BINARY";
     case AST_UNARY:
         return "UNARY";
-    case AST_NUMBER:
-        return "NUMBER";
-    case AST_STRING:
-        return "STRING";
+    case AST_INT_LITERAL:
+        return "INT_LITERAL";
+    case AST_LONG_LITERAL:
+        return "LONG_LITERAL";
+    case AST_FLOAT_LITERAL:
+        return "FLOAT_LITERAL";
+    case AST_BOOL_LITERAL:
+        return "BOOL_LITERAL";
+    case AST_STRING_LITERAL:
+        return "STRING_LITERAL";
     case AST_VAR:
         return "VAR";
     case AST_CALL:
@@ -370,11 +376,20 @@ static void dump_ast_node(ASTNode *node, int depth) {
     case AST_ASSIGN:
         printf(" name=%s", node->as.assign.name);
         break;
-    case AST_NUMBER:
-        printf(" value=%d", node->as.number.value);
+    case AST_INT_LITERAL:
+        printf(" value=%d", node->as.int_literal.value);
         break;
-    case AST_STRING:
-        printf(" value=\"%s\"", node->as.string.value);
+    case AST_LONG_LITERAL:
+        printf(" value=%lld", node->as.long_literal.value);
+        break;
+    case AST_FLOAT_LITERAL:
+        printf(" value=%g", node->as.float_literal.value);
+        break;
+    case AST_BOOL_LITERAL:
+        printf(" value=%s", node->as.bool_literal.value ? "true" : "false");
+        break;
+    case AST_STRING_LITERAL:
+        printf(" value=\"%s\"", node->as.string_literal.value);
         break;
     case AST_VAR:
         printf(" name=%s", node->as.var.name);
@@ -468,8 +483,11 @@ static void dump_ast_node(ASTNode *node, int depth) {
         dump_ast_node(node->as.while_stmt.body, depth + 1);
         dump_ast_node(node->as.while_stmt.cond, depth + 1);
         break;
-    case AST_NUMBER:
-    case AST_STRING:
+    case AST_INT_LITERAL:
+    case AST_LONG_LITERAL:
+    case AST_FLOAT_LITERAL:
+    case AST_BOOL_LITERAL:
+    case AST_STRING_LITERAL:
     case AST_VAR:
     case AST_BREAK:
     case AST_PASS:
@@ -491,8 +509,12 @@ static int dump_helix_tokens(const char *source_path) {
     lexer_init(&lexer, source);
     do {
         tok = lexer_next(&lexer);
-        if (tok.type == TOKEN_NUMBER)
+        if (tok.type == TOKEN_INT_LITERAL)
             printf("%d\t%s\t%s\t%d\n", tok.line, "HLX", token_type_to_string(tok.type), tok.value);
+        else if (tok.type == TOKEN_LONG_LITERAL)
+            printf("%d\t%s\t%s\t%lld\n", tok.line, "HLX", token_type_to_string(tok.type), tok.long_value);
+        else if (tok.type == TOKEN_FLOAT_LITERAL)
+            printf("%d\t%s\t%s\t%g\n", tok.line, "HLX", token_type_to_string(tok.type), tok.float_value);
         else if (tok.lexeme)
             printf("%d\t%s\t%s\t%s\n", tok.line, "HLX", token_type_to_string(tok.type), tok.lexeme);
         else
@@ -720,7 +742,18 @@ static int dump_ast_source(const char *source_path) {
  *   linked together with any other COFF .obj (Forge or C-produced).
  */
 static int assemble_object(const char *asm_path, const char *obj_path) {
-    int rc = forge_assemble_file(asm_path, obj_path);
+    const char *argv[16];
+    int argc = 0;
+    argv[argc++] = "nasm";
+    argv[argc++] = "-f";
+    argv[argc++] = "win64";
+    argv[argc++] = asm_path;
+    argv[argc++] = "-o";
+    argv[argc++] = obj_path;
+    argv[argc++] = NULL;
+    // Use NASM directly (Forge assembler has instruction encoding issues)
+    // int rc = forge_assemble_file(asm_path, obj_path);
+    int rc = run_process("nasm", argv);
     if (rc != 0)
         fprintf(stderr, "Forge error: assembly failed for '%s'\n", asm_path);
     return rc;

@@ -81,10 +81,13 @@ void ast_free(ASTNode *node) {
     case AST_UNARY:
         ast_free(node->as.unary.operand);
         break;
-    case AST_NUMBER:
+    case AST_INT_LITERAL:
+    case AST_LONG_LITERAL:
+    case AST_FLOAT_LITERAL:
+    case AST_BOOL_LITERAL:
         break; /* no dynamic memory */
-    case AST_STRING:
-        free(node->as.string.value);
+    case AST_STRING_LITERAL:
+        free(node->as.string_literal.value);
         break;
     case AST_VAR:
         free(node->as.var.name);
@@ -240,19 +243,44 @@ ASTNode *ast_unary(UnaryOp op, ASTNode *operand, int line) {
     return node;
 }
 
-/* Create a number literal node */
-ASTNode *ast_number(int value, int line) {
-    ASTNode *node = ast_new(AST_NUMBER, line);
-    node->as.number.value = value;
+/* Create an int literal node */
+ASTNode *ast_int_literal(int value, int line) {
+    ASTNode *node = ast_new(AST_INT_LITERAL, line);
+    node->as.int_literal.value = value;
+    return node;
+}
+
+/* Create a long literal node */
+ASTNode *ast_long_literal(long long value, int line) {
+    ASTNode *node = ast_new(AST_LONG_LITERAL, line);
+    node->as.long_literal.value = value;
+    return node;
+}
+
+/* Create a float literal node */
+ASTNode *ast_float_literal(double value, int line) {
+    ASTNode *node = ast_new(AST_FLOAT_LITERAL, line);
+    node->as.float_literal.value = value;
+    return node;
+}
+
+/* Create a bool literal node */
+ASTNode *ast_bool_literal(int value, int line) {
+    ASTNode *node = ast_new(AST_BOOL_LITERAL, line);
+    node->as.bool_literal.value = value;
     return node;
 }
 
 /* Create a string literal node */
-ASTNode *ast_string(char *value, int line) {
-    ASTNode *node = ast_new(AST_STRING, line);
-    node->as.string.value = value;
+ASTNode *ast_string_literal(char *value, int line) {
+    ASTNode *node = ast_new(AST_STRING_LITERAL, line);
+    node->as.string_literal.value = value;
     return node;
 }
+
+/* Backward compatibility: old ast_number/ast_string names */
+ASTNode *ast_number(int value, int line) { return ast_int_literal(value, line); }
+ASTNode *ast_string(char *value, int line) { return ast_string_literal(value, line); }
 
 /* Create a variable reference node */
 ASTNode *ast_var(char *name, int line) {

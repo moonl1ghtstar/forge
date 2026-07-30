@@ -155,19 +155,20 @@ static TokenType check_keyword(const char *word) {
         return TOKEN_CONST;
     if (strcmp(word, "global") == 0)
         return TOKEN_GLOBAL;
-    if (strcmp(word, "True") == 0)
+    if (strcmp(word, "True") == 0 || strcmp(word, "true") == 0)
         return TOKEN_TRUE;
-    if (strcmp(word, "False") == 0)
+    if (strcmp(word, "False") == 0 || strcmp(word, "false") == 0)
         return TOKEN_FALSE;
     return TOKEN_IDENT;
 }
 
-/* Read a number literal (integer only in current version) */
+/* Read a number literal (integer, long, or float) */
 static Token read_number(Lexer *lex) {
     int start = lex->pos;
     int line = lex->line;
     int col = start - lex->line_start + 1;
     int base = 10;
+    int is_float = 0;
     if (peek(lex) == '0' && (peek_next(lex) == 'x' || peek_next(lex) == 'X')) {
         advance(lex);
         advance(lex);
@@ -180,17 +181,39 @@ static Token read_number(Lexer *lex) {
     } else {
         while (isdigit((unsigned char)peek(lex)))
             advance(lex);
+        if (peek(lex) == '.' && isdigit((unsigned char)peek_next(lex))) {
+            is_float = 1;
+            advance(lex);
+            while (isdigit((unsigned char)peek(lex)))
+                advance(lex);
+        }
+    }
+    int has_long_suffix = 0;
+    if (!is_float && (peek(lex) == 'L' || peek(lex) == 'l')) {
+        has_long_suffix = 1;
+        advance(lex);
     }
     int len = lex->pos - start;
     char *buf = (char *)malloc(len + 1);
     memcpy(buf, lex->source + start, len);
     buf[len] = '\0';
     Token t;
-    t.type = TOKEN_NUMBER;
     t.lexeme = buf;
     t.line = line;
     t.col = col;
-    t.value = (int)strtol(buf, NULL, base);
+    t.value = 0;
+    t.long_value = 0;
+    t.float_value = 0.0;
+    if (is_float) {
+        t.type = TOKEN_FLOAT_LITERAL;
+        t.float_value = strtod(buf, NULL);
+    } else if (has_long_suffix) {
+        t.type = TOKEN_LONG_LITERAL;
+        t.long_value = strtoll(buf, NULL, base);
+    } else {
+        t.type = TOKEN_INT_LITERAL;
+        t.value = (int)strtoll(buf, NULL, base);
+    }
     return t;
 }
 
@@ -415,8 +438,12 @@ const char *token_type_to_string(TokenType type) {
         return "++";
     case TOKEN_IDENT:
         return "identifier";
-    case TOKEN_NUMBER:
-        return "number";
+    case TOKEN_INT_LITERAL:
+        return "int_literal";
+    case TOKEN_LONG_LITERAL:
+        return "long_literal";
+    case TOKEN_FLOAT_LITERAL:
+        return "float_literal";
     case TOKEN_STRING:
         return "string";
     case TOKEN_LBRACE:

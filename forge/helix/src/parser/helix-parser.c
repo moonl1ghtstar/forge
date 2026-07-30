@@ -104,8 +104,14 @@ static void describe_token(const Token *tok, char *buf, size_t buf_size) {
     case TOKEN_STRING:
         snprintf(buf, buf_size, "string \"%s\"", tok->lexeme ? tok->lexeme : "");
         break;
-    case TOKEN_NUMBER:
-        snprintf(buf, buf_size, "number %d", tok->value);
+    case TOKEN_INT_LITERAL:
+        snprintf(buf, buf_size, "int %d", tok->value);
+        break;
+    case TOKEN_LONG_LITERAL:
+        snprintf(buf, buf_size, "long %lld", tok->long_value);
+        break;
+    case TOKEN_FLOAT_LITERAL:
+        snprintf(buf, buf_size, "float %g", tok->float_value);
         break;
     case TOKEN_ERROR:
         snprintf(buf, buf_size, "invalid token (%s)", tok->lexeme ? tok->lexeme : "unknown");
@@ -1740,18 +1746,28 @@ static ASTNode *parse_unary(Parser *p) {
 static ASTNode *parse_primary(Parser *p) {
     /* True / False literals */
     if (match(p, TOKEN_TRUE))
-        return ast_number(1, p->previous.line);
+        return ast_bool_literal(1, p->previous.line);
     if (match(p, TOKEN_FALSE))
-        return ast_number(0, p->previous.line);
+        return ast_bool_literal(0, p->previous.line);
 
-    /* Number literal */
-    if (match(p, TOKEN_NUMBER)) {
-        return ast_number(p->previous.value, p->previous.line);
+    /* Integer literal */
+    if (match(p, TOKEN_INT_LITERAL)) {
+        return ast_int_literal(p->previous.value, p->previous.line);
+    }
+
+    /* Long literal */
+    if (match(p, TOKEN_LONG_LITERAL)) {
+        return ast_long_literal(p->previous.long_value, p->previous.line);
+    }
+
+    /* Float literal */
+    if (match(p, TOKEN_FLOAT_LITERAL)) {
+        return ast_float_literal(p->previous.float_value, p->previous.line);
     }
 
     /* String literal */
     if (match(p, TOKEN_STRING)) {
-        return ast_string(strdup(p->previous.lexeme), p->previous.line);
+        return ast_string_literal(strdup(p->previous.lexeme), p->previous.line);
     }
 
     /* Parenthesized expression */
@@ -1770,7 +1786,7 @@ static ASTNode *parse_primary(Parser *p) {
 
     parse_error(p, "expected expression");
     advance(p);                             /* skip the problematic token */
-    return ast_number(0, p->previous.line); /* return a dummy node */
+    return ast_int_literal(0, p->previous.line); /* return a dummy node */
 }
 
 static ASTNode *parse_postfix(Parser *p, ASTNode *base, int line) {

@@ -14,6 +14,9 @@
 typedef enum {
     IR_VALUE_NONE,
     IR_VALUE_CONST_INT,
+    IR_VALUE_CONST_LONG,
+    IR_VALUE_CONST_FLOAT,
+    IR_VALUE_CONST_BOOL,
     IR_VALUE_CONST_STRING,
     IR_VALUE_TEMP,
     IR_VALUE_LOCAL
@@ -22,13 +25,24 @@ typedef enum {
 typedef struct {
     IRValueKind kind;
     int is_string;
+    int is_float;
     union {
         int int_value;
+        long long long_value;
+        double float_value;
         int temp_id;
         int local_index;
         char *string_value;
     } as;
 } IRValue;
+
+typedef enum {
+    CONSOLE_PRINT_STR,
+    CONSOLE_PRINT_INT,
+    CONSOLE_PRINT_LONG,
+    CONSOLE_PRINT_FLOAT,
+    CONSOLE_PRINT_BOOL
+} ConsolePrintType;
 
 typedef enum {
     IR_OP_CONST,
@@ -44,6 +58,7 @@ typedef enum {
     IR_OP_JUMP,
     IR_OP_BRANCH,
     IR_OP_CALL,
+    IR_OP_CONSOLE_PRINT,
     IR_OP_RETURN,
     IR_OP_NOP
 } IROp;
@@ -109,6 +124,10 @@ struct IRInstruction {
             int arg_count;
         } call;
         struct {
+            int print_type;
+            IRValue value;
+        } console_print;
+        struct {
             IRValue value;
             int has_value;
         } ret;
@@ -145,6 +164,9 @@ typedef struct {
 
 IRValue ir_value_none(void);
 IRValue ir_value_const_int(int value);
+IRValue ir_value_const_long(long long value);
+IRValue ir_value_const_float(double value);
+IRValue ir_value_const_bool(int value);
 IRValue ir_value_const_string(char *value);
 IRValue ir_value_temp(int temp_id, int is_string);
 IRValue ir_value_local(int local_index, int is_string);

@@ -16,6 +16,7 @@ IRValue ir_value_none(void) {
     IRValue v;
     v.kind = IR_VALUE_NONE;
     v.is_string = 0;
+    v.is_float = 0;
     v.as.int_value = 0;
     return v;
 }
@@ -24,6 +25,34 @@ IRValue ir_value_const_int(int value) {
     IRValue v;
     v.kind = IR_VALUE_CONST_INT;
     v.is_string = 0;
+    v.is_float = 0;
+    v.as.int_value = value;
+    return v;
+}
+
+IRValue ir_value_const_long(long long value) {
+    IRValue v;
+    v.kind = IR_VALUE_CONST_LONG;
+    v.is_string = 0;
+    v.is_float = 0;
+    v.as.long_value = value;
+    return v;
+}
+
+IRValue ir_value_const_float(double value) {
+    IRValue v;
+    v.kind = IR_VALUE_CONST_FLOAT;
+    v.is_string = 0;
+    v.is_float = 1;
+    v.as.float_value = value;
+    return v;
+}
+
+IRValue ir_value_const_bool(int value) {
+    IRValue v;
+    v.kind = IR_VALUE_CONST_BOOL;
+    v.is_string = 0;
+    v.is_float = 0;
     v.as.int_value = value;
     return v;
 }
@@ -32,6 +61,7 @@ IRValue ir_value_const_string(char *value) {
     IRValue v;
     v.kind = IR_VALUE_CONST_STRING;
     v.is_string = 1;
+    v.is_float = 0;
     v.as.string_value = value;
     return v;
 }
@@ -40,6 +70,7 @@ IRValue ir_value_temp(int temp_id, int is_string) {
     IRValue v;
     v.kind = IR_VALUE_TEMP;
     v.is_string = is_string;
+    v.is_float = 0;
     v.as.temp_id = temp_id;
     return v;
 }
@@ -48,6 +79,7 @@ IRValue ir_value_local(int local_index, int is_string) {
     IRValue v;
     v.kind = IR_VALUE_LOCAL;
     v.is_string = is_string;
+    v.is_float = 0;
     v.as.local_index = local_index;
     return v;
 }
@@ -198,6 +230,15 @@ static void dump_value(FILE *out, IRValue value) {
     case IR_VALUE_CONST_INT:
         fprintf(out, "%d", value.as.int_value);
         break;
+    case IR_VALUE_CONST_LONG:
+        fprintf(out, "%lldL", value.as.long_value);
+        break;
+    case IR_VALUE_CONST_FLOAT:
+        fprintf(out, "%g", value.as.float_value);
+        break;
+    case IR_VALUE_CONST_BOOL:
+        fprintf(out, "%s", value.as.int_value ? "true" : "false");
+        break;
     case IR_VALUE_CONST_STRING:
         fprintf(out, "\"%s\"", value.as.string_value ? value.as.string_value : "");
         break;
@@ -228,6 +269,7 @@ static const char *op_name(IROp op) {
     case IR_OP_JUMP: return "jump";
     case IR_OP_BRANCH: return "branch";
     case IR_OP_CALL: return "call";
+    case IR_OP_CONSOLE_PRINT: return "console_print";
     case IR_OP_RETURN: return "return";
     default: return "nop";
     }
@@ -333,6 +375,10 @@ void ir_dump_program(const IRProgram *program, FILE *out) {
                         dump_value(out, ins->as.call.args[k]);
                     }
                     fprintf(out, ")");
+                    break;
+                case IR_OP_CONSOLE_PRINT:
+                    fprintf(out, " %d ", ins->as.console_print.print_type);
+                    dump_value(out, ins->as.console_print.value);
                     break;
                 case IR_OP_RETURN:
                     if (ins->as.ret.has_value) {

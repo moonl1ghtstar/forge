@@ -245,6 +245,50 @@ static IRValue emit_const_int(IRBuilder *b, int value, int line) {
     return out;
 }
 
+static IRValue emit_const_long(IRBuilder *b, long long value, int line) {
+    IRInstruction ins;
+    IRValue out;
+    memset(&ins, 0, sizeof(ins));
+    ins.op = IR_OP_CONST;
+    ins.line = line;
+    ins.has_result = 1;
+    ins.result = ir_value_temp(new_temp(b), 0);
+    ins.as.constant.value = ir_value_const_long(value);
+    ir_block_add_instruction(current_block(b), ins);
+    out = ir_value_temp(ins.result.as.temp_id, 0);
+    return out;
+}
+
+static IRValue emit_const_float(IRBuilder *b, double value, int line) {
+    IRInstruction ins;
+    IRValue out;
+    memset(&ins, 0, sizeof(ins));
+    ins.op = IR_OP_CONST;
+    ins.line = line;
+    ins.has_result = 1;
+    ins.result = ir_value_temp(new_temp(b), 0);
+    ins.result.is_float = 1;
+    ins.as.constant.value = ir_value_const_float(value);
+    ir_block_add_instruction(current_block(b), ins);
+    out = ir_value_temp(ins.result.as.temp_id, 0);
+    out.is_float = 1;
+    return out;
+}
+
+static IRValue emit_const_bool(IRBuilder *b, int value, int line) {
+    IRInstruction ins;
+    IRValue out;
+    memset(&ins, 0, sizeof(ins));
+    ins.op = IR_OP_CONST;
+    ins.line = line;
+    ins.has_result = 1;
+    ins.result = ir_value_temp(new_temp(b), 0);
+    ins.as.constant.value = ir_value_const_bool(value);
+    ir_block_add_instruction(current_block(b), ins);
+    out = ir_value_temp(ins.result.as.temp_id, 0);
+    return out;
+}
+
 static IRValue lower_expr(IRBuilder *b, ASTNode *node);
 static void lower_stmt(IRBuilder *b, ASTNode *node);
 static void lower_block(IRBuilder *b, ASTNode *node);
@@ -275,7 +319,6 @@ static IRValue lower_call(IRBuilder *b, ASTNode *node) {
     memset(&ins, 0, sizeof(ins));
     ins.op = IR_OP_CALL;
     ins.line = node->line;
-    ins.as.call.callee = strdup(fname);
     ins.as.call.arg_count = node->as.call.arg_count;
     if (node->as.call.arg_count > 0) {
         ins.as.call.args = (IRValue *)calloc((size_t)node->as.call.arg_count, sizeof(IRValue));
@@ -283,6 +326,30 @@ static IRValue lower_call(IRBuilder *b, ASTNode *node) {
             ins.as.call.args[i] = lower_expr(b, node->as.call.args[i]);
     }
 
+    if ((strcmp(fname, "console_print") == 0 || strcmp(fname, "print") == 0) && ins.as.call.arg_count > 0) {
+        IRValue *saved_args = ins.as.call.args;
+        IRValue arg0 = saved_args[0];
+        ins.op = IR_OP_CONSOLE_PRINT;
+        if (arg0.is_string) {
+            ins.as.console_print.print_type = CONSOLE_PRINT_STR;
+        } else {
+            const char *rtype = node->as.call.args[0] ? node->as.call.args[0]->resolved_type : NULL;
+            if (rtype && (strcmp(rtype, "str") == 0 || strcmp(rtype, "string") == 0))
+                ins.as.console_print.print_type = CONSOLE_PRINT_STR;
+            else if (rtype && strcmp(rtype, "long") == 0)
+                ins.as.console_print.print_type = CONSOLE_PRINT_LONG;
+            else if (rtype && strcmp(rtype, "float") == 0)
+                ins.as.console_print.print_type = CONSOLE_PRINT_FLOAT;
+            else if (rtype && strcmp(rtype, "bool") == 0)
+                ins.as.console_print.print_type = CONSOLE_PRINT_BOOL;
+            else
+                ins.as.console_print.print_type = CONSOLE_PRINT_INT;
+        }
+        ins.as.console_print.value = arg0;
+        free(saved_args);
+    } else {
+        ins.as.call.callee = strdup(fname);
+    }
     ins.has_result = 1;
     ins.result = ir_value_temp(new_temp(b), 0);
     ir_block_add_instruction(current_block(b), ins);
@@ -379,10 +446,16 @@ static IRValue lower_expr(IRBuilder *b, ASTNode *node) {
     ensure_block(b);
 
     switch (node->type) {
-    case AST_NUMBER:
-        return emit_const_int(b, node->as.number.value, node->line);
-    case AST_STRING:
-        return emit_const_string(b, strdup(node->as.string.value), node->line);
+    case AST_INT_LITERAL:
+        return emit_const_int(b, node->as.int_literal.value, node->line);
+    case AST_LONG_LITERAL:
+        return emit_const_long(b, node->as.long_literal.value, node->line);
+    case AST_FLOAT_LITERAL:
+        return emit_const_float(b, node->as.float_literal.value, node->line);
+    case AST_BOOL_LITERAL:
+        return emit_const_bool(b, node->as.bool_literal.value, node->line);
+    case AST_STRING_LITERAL:
+        return emit_const_string(b, strdup(node->as.string_literal.value), node->line);
     case AST_VAR:
         return lookup_value(b, node->as.var.name, node->line);
     case AST_FIELD_ACCESS:

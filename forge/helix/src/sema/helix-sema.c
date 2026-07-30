@@ -279,10 +279,19 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
     if (!node)
         return;
     switch (node->type) {
-    case AST_NUMBER:
+    case AST_INT_LITERAL:
         node->resolved_type = strdup("int");
         break;
-    case AST_STRING:
+    case AST_LONG_LITERAL:
+        node->resolved_type = strdup("long");
+        break;
+    case AST_FLOAT_LITERAL:
+        node->resolved_type = strdup("float");
+        break;
+    case AST_BOOL_LITERAL:
+        node->resolved_type = strdup("bool");
+        break;
+    case AST_STRING_LITERAL:
         node->resolved_type = strdup("str");
         break;
     case AST_VAR:
@@ -337,7 +346,24 @@ static void analyze_expr(SemaCtx *ctx, ASTNode *node) {
         int i;
         for (i = 0; i < node->as.call.arg_count; i++)
             analyze_expr(ctx, node->as.call.args[i]);
-        {
+        if (strcmp(node->as.call.name, "console_print") == 0 || strcmp(node->as.call.name, "print") == 0) {
+            if (node->as.call.arg_count != 1) {
+                sema_error(ctx, node->line,
+                           "function '%s' expects 1 argument, got %d.",
+                           node->as.call.name, node->as.call.arg_count);
+            } else {
+                ASTNode *arg0 = node->as.call.args[0];
+                const char *rtype = arg0 ? arg0->resolved_type : NULL;
+                if (rtype) {
+                    if (strcmp(rtype, "str") != 0 && strcmp(rtype, "int") != 0 &&
+                        strcmp(rtype, "long") != 0 && strcmp(rtype, "float") != 0 &&
+                        strcmp(rtype, "bool") != 0) {
+                        sema_error(ctx, node->line,
+                                   "cannot print value of type '%s'.", rtype);
+                    }
+                }
+            }
+        } else {
             FuncEntry *f = lookup_function(ctx, node->as.call.name);
             if (f) {
                 if (f->param_count != node->as.call.arg_count) {

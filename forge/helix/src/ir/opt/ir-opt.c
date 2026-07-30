@@ -191,6 +191,10 @@ static void optimize_function(IRFunction *func) {
                                 uses[ins->as.call.args[k].as.temp_id]++;
                         }
                         break;
+                    case IR_OP_CONSOLE_PRINT:
+                        if (ins->as.console_print.value.kind == IR_VALUE_TEMP && uses && ins->as.console_print.value.as.temp_id < func->temp_count)
+                            uses[ins->as.console_print.value.as.temp_id]++;
+                        break;
                     default:
                         break;
                     }

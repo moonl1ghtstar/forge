@@ -38,7 +38,9 @@ typedef enum {
 
     /* Identifiers and literals */
     TOKEN_IDENT,
-    TOKEN_NUMBER,
+    TOKEN_INT_LITERAL,
+    TOKEN_LONG_LITERAL,
+    TOKEN_FLOAT_LITERAL,
     TOKEN_STRING,
 
     /* Delimiters */
@@ -82,8 +84,13 @@ typedef struct {
     char *lexeme; /* Dynamically allocated string of the token text */
     int line;     /* Source line number where this token appears */
     int col;      /* Source column number (1-based) */
-    int value;    /* Numeric value for TOKEN_NUMBER tokens */
+    int value;    /* Numeric value for TOKEN_INT_LITERAL tokens */
+    long long long_value;  /* Numeric value for TOKEN_LONG_LITERAL tokens */
+    double float_value;    /* Numeric value for TOKEN_FLOAT_LITERAL tokens */
 } Token;
+
+/* Backward compatibility alias */
+#define TOKEN_NUMBER TOKEN_INT_LITERAL
 
 /* Convert a token type to a human-readable string for error messages */
 const char *token_type_to_string(TokenType type);

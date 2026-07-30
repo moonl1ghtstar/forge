@@ -24,8 +24,11 @@ typedef enum {
     AST_RETURN,       /* Return statement */
     AST_BINARY,       /* Binary expression: lhs op rhs */
     AST_UNARY,        /* Unary expression: op operand */
-    AST_NUMBER,       /* Integer literal */
-    AST_STRING,       /* String literal (for FFI) */
+    AST_INT_LITERAL,       /* Integer literal: 123 */
+    AST_LONG_LITERAL,      /* Long literal: 123L */
+    AST_FLOAT_LITERAL,     /* Float literal: 3.14 */
+    AST_BOOL_LITERAL,      /* Bool literal: true/false */
+    AST_STRING_LITERAL,    /* String literal */
     AST_VAR,          /* Variable reference */
     AST_CALL,         /* Function call */
     AST_EXTERN_FUNC,  /* Extern function declaration (FFI) */
@@ -138,15 +141,30 @@ struct ASTNode {
             ASTNode *operand;
         } unary;
 
-        /* AST_NUMBER: integer literal value */
+        /* AST_INT_LITERAL: integer literal value */
         struct {
             int value;
-        } number;
+        } int_literal;
 
-        /* AST_STRING: string literal content */
+        /* AST_LONG_LITERAL: long literal value */
+        struct {
+            long long value;
+        } long_literal;
+
+        /* AST_FLOAT_LITERAL: float literal value */
+        struct {
+            double value;
+        } float_literal;
+
+        /* AST_BOOL_LITERAL: bool literal value (0 or 1) */
+        struct {
+            int value;
+        } bool_literal;
+
+        /* AST_STRING_LITERAL: string literal content */
         struct {
             char *value;
-        } string;
+        } string_literal;
 
         /* AST_VAR: variable name reference */
         struct {
@@ -224,6 +242,12 @@ ASTNode *ast_while(ASTNode *cond, ASTNode *body, int line);
 ASTNode *ast_return(ASTNode *expr, int line);
 ASTNode *ast_binary(ASTNode *left, BinaryOp op, ASTNode *right, int line);
 ASTNode *ast_unary(UnaryOp op, ASTNode *operand, int line);
+ASTNode *ast_int_literal(int value, int line);
+ASTNode *ast_long_literal(long long value, int line);
+ASTNode *ast_float_literal(double value, int line);
+ASTNode *ast_bool_literal(int value, int line);
+ASTNode *ast_string_literal(char *value, int line);
+/* Backward compatibility aliases */
 ASTNode *ast_number(int value, int line);
 ASTNode *ast_string(char *value, int line);
 ASTNode *ast_var(char *name, int line);
