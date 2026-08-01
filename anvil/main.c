@@ -52,7 +52,7 @@
 #include <unistd.h>
 #endif
 
-/* Helix errors @file:docs/development/diagnostics.md */
+/* Helix errors */
 #include "errors/helix-errors.h"
 
 /* Helix frontend headers */
