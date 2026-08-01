@@ -1,12 +1,12 @@
-# Build Forge
+# Build Anvil
 
-This guide explains how to build the Forge compiler from source.
+This guide explains how to build the Anvil compiler from source.
 
 ---
 
 # Requirements
 
-Before building Forge, make sure the following tools are installed.
+Before building Anvil, make sure the following tools are installed.
 
 ## Operating System
 
@@ -35,11 +35,11 @@ If both commands work, your environment is ready.
 The repository should look similar to this:
 
 ```text
-forge/
+anvil/
 │
 ├── build.bat
 ├── module/
-├── forge/
+├── anvil/
 ├── docs/
 └── samples/
 ```
@@ -56,8 +56,8 @@ build.bat
 
 The script will:
 
-1. Compile all Forge source files.
-2. Build `forge.exe`.
+1. Compile all Anvil source files.
+2. Build `anv.exe`.
 3. Create the shortcut executables:
    - `fg.exe`
    - `4g.exe`
@@ -70,11 +70,11 @@ The script will:
 After a successful build:
 
 ```text
-forge/
-└── forge/
+anvil/
+└── anvil/
     └── bin/
         ├── bin/
-        │   ├── forge.exe
+        │   ├── anv.exe
         │   ├── fg.exe
         │   └── 4g.exe
         │
@@ -91,7 +91,7 @@ forge/
 Compile one of the sample programs.
 
 ```powershell
-forge samples\hello.hlx -run
+anv samples\hello.hlx -run
 ```
 
 Expected output:
@@ -102,12 +102,12 @@ Hello from Helix!
 
 ---
 
-# Add Forge to PATH (Optional)
+# Add Anvil to PATH (Optional)
 
-To use Forge globally, add:
+To use Anvil globally, add:
 
 ```text
-forge\bin\bin
+anvil\bin\bin
 ```
 
 to your Windows **PATH** environment variable.
@@ -115,7 +115,7 @@ to your Windows **PATH** environment variable.
 After reopening the terminal:
 
 ```powershell
-forge --help
+anv --help
 ```
 
 or
@@ -147,7 +147,7 @@ Solution:
 
 ## ld is not found
 
-Forge uses the GNU linker.
+Anvil uses the GNU linker.
 
 Make sure `ld.exe` is available from the installed MinGW toolchain.
 
@@ -164,7 +164,7 @@ import console
 check that
 
 ```text
-forge/bin/lib/
+anvil/bin/lib/
 ```
 
 contains the built-in modules.
@@ -181,7 +181,7 @@ again.
 
 # Next Step
 
-Once Forge is successfully built, continue with:
+Once Anvil is successfully built, continue with:
 
 - **quick-start.md** — Write and compile your first Helix program.
-- **install.md** — Install Forge for system-wide usage.
+- **install.md** — Install Anvil for system-wide usage.

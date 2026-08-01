@@ -10,57 +10,57 @@ import utils
 
 HELLO_HLX = os.path.join(TEST_ROOT, "cases", "hello.hlx")
 
-def assert_fuzz_failure(forge_bin, args):
-    stdout, stderr, code = utils.run_command([forge_bin] + args, expected_code=None, timeout=10)
+def assert_fuzz_failure(anv_bin, args):
+    stdout, stderr, code = utils.run_command([anv_bin] + args, expected_code=None, timeout=10)
     
     if code == 0:
         raise AssertionError(f"Expected non-zero exit code for args {args}, got 0")
     
     combined_output = stdout + "\n" + stderr
-    if "Forge error:" not in combined_output:
-        raise AssertionError(f"Expected 'Forge error:' in output for args {args}. Output:\n{combined_output}")
+    if "Anvil error:" not in combined_output:
+        raise AssertionError(f"Expected 'Anvil error:' in output for args {args}. Output:\n{combined_output}")
 
-def test_1_empty_arguments(forge_bin):
-    assert_fuzz_failure(forge_bin, [])
+def test_1_empty_arguments(anv_bin):
+    assert_fuzz_failure(anv_bin, [])
 
-def test_2_invalid_flag(forge_bin):
-    assert_fuzz_failure(forge_bin, ["unknown_file.hlx", "-abc"])
+def test_2_invalid_flag(anv_bin):
+    assert_fuzz_failure(anv_bin, ["unknown_file.hlx", "-abc"])
 
-def test_3_missing_output_value(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "-o"])
+def test_3_missing_output_value(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-o"])
 
-def test_4_link_mode_without_objects(forge_bin):
-    assert_fuzz_failure(forge_bin, ["-link"])
+def test_4_link_mode_without_objects(anv_bin):
+    assert_fuzz_failure(anv_bin, ["-link"])
 
-def test_5_link_missing_object(forge_bin):
-    assert_fuzz_failure(forge_bin, ["-link", "nonexistent.obj"])
+def test_5_link_missing_object(anv_bin):
+    assert_fuzz_failure(anv_bin, ["-link", "nonexistent.obj"])
 
-def test_6_conflicting_output_flags(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "-asm", "-obj"])
+def test_6_conflicting_output_flags(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-asm", "-obj"])
 
-def test_7_invalid_run_object_combination(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "-run", "-obj"])
+def test_7_invalid_run_object_combination(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-run", "-obj"])
 
-def test_8_conflicting_pipeline_flags(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "-dump-ir", "-run"])
+def test_8_conflicting_pipeline_flags(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-dump-ir", "-run"])
 
-def test_9_unknown_long_option(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "--unknown"])
+def test_9_unknown_long_option(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "--unknown"])
 
-def test_10_empty_output(forge_bin):
-    assert_fuzz_failure(forge_bin, [HELLO_HLX, "-o", ""])
+def test_10_empty_output(anv_bin):
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-o", ""])
 
-def test_11_empty_input(forge_bin):
-    assert_fuzz_failure(forge_bin, [""])
+def test_11_empty_input(anv_bin):
+    assert_fuzz_failure(anv_bin, [""])
 
-def test_12_invalid_extension(forge_bin):
-    assert_fuzz_failure(forge_bin, ["invalid.txt"])
+def test_12_invalid_extension(anv_bin):
+    assert_fuzz_failure(anv_bin, ["invalid.txt"])
 
-def test_13_invalid_linker_arguments(forge_bin):
-    assert_fuzz_failure(forge_bin, ["hello.obj", "-link", "fake.obj", "extra_argument"])
+def test_13_invalid_linker_arguments(anv_bin):
+    assert_fuzz_failure(anv_bin, ["hello.obj", "-link", "fake.obj", "extra_argument"])
 
 def main():
-    forge_bin = utils.locate_forge()
+    anv_bin = utils.locate_anv()
     
     tests = [
         ("Empty arguments", test_1_empty_arguments),
@@ -85,7 +85,7 @@ def main():
     for name, test_func in tests:
         print(f"[ RUN ] {name}")
         try:
-            test_func(forge_bin)
+            test_func(anv_bin)
             print(f"[ PASS ] {name}")
             passed_count += 1
         except Exception as e:

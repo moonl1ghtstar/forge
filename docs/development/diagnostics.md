@@ -1,5 +1,5 @@
 
-# Forge Diagnostics Specification
+# Anvil Diagnostics Specification
 ```
 <LEVEL>[<ERR_CODE>]: <ERR_MSG>
  --> <FILE_NAME>:<LINE>:<COLUMN>

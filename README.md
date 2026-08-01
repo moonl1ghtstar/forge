@@ -1,6 +1,6 @@
-# Forge Compiler
+# Anvil Compiler
 
-Forge is a multi-language compiler front-end targeting Windows x64.
+Anvil is a multi-language compiler front-end targeting Windows x64.
 It compiles `.hlx` (Helix), `.c` (C subset) and `.asm` (Asm) source files into
 x86-64 Windows assembly and drives `ld` to produce native `.exe` binaries.
 
@@ -45,7 +45,7 @@ Supported features:
 - External function declarations:
   - `extern` (FFI support)
 - Struct definitions and field access
-- Native x86-64 code generation through Forge backend
+- Native x86-64 code generation through Anvil backend
 
 ---
 
@@ -78,7 +78,7 @@ Supported features:
 
 ### Assembly (`.asm`)
 
-Forge includes a built-in x86-64 assembler.
+Anvil includes a built-in x86-64 assembler.
 
 Supported features:
 
@@ -94,11 +94,11 @@ The same assembler engine is used for:
 ```
 Compiler generated ASM
         ↓
-Forge Assembler
+Anvil Assembler
 
 User written ASM
         ↓
-Forge Assembler
+Anvil Assembler
 ```
 
 ---
@@ -106,8 +106,8 @@ Forge Assembler
 ## Project Layout
 
 ```
-forge/                        Root
-  build.bat                   Builds forge.exe with gcc, then copies module/ → forge/bin/lib/
+anvil/                        Root
+  build.bat                   Builds anv.exe with gcc, then copies module/ → anvil/bin/lib/
   docs/
 
   module/                     Built-in module sources
@@ -115,7 +115,7 @@ forge/                        Root
       console/                console module (print, input, clear, color)
         src/                  Per-function .hlx source files
 
-  forge/
+  anvil/
     main.c                    Entry point, CLI, pipeline dispatcher
 
     assembler/                Built-in x86-64 assembler
@@ -125,7 +125,7 @@ forge/                        Root
         parser/               ASM parser and operand analysis
         x86-encode/           x86-64 instruction encoder
         coff-writer/          COFF object file generator
-        forge-asm/            Assembler frontend and integration
+        anv-asm/            Assembler frontend and integration
       test/                   Assembler test programs
 
     helix/
@@ -149,7 +149,7 @@ forge/                        Root
       docs/                   C frontend documentation
 
     bin/
-      bin/                    forge.exe, fg.exe, 4g.exe
+      bin/                    anv.exe, fg.exe, 4g.exe
       lib/                    Module files (copied here by build.bat)
         console/
           src/
@@ -162,7 +162,7 @@ forge/                        Root
 
     idea/                     Experimental ideas and prototypes
 
-  samples/                    Sample Forge programs
+  samples/                    Sample Anvil programs
 
   temp/                       Temporary build files
 
@@ -180,7 +180,7 @@ forge/                        Root
 
 ## Error Reporting
 
-Forge emits structured, colored diagnostics in the style of rustc:
+Anvil emits structured, colored diagnostics in the style of rustc:
 
 ```
 error[E204]: expected ';' after variable declaration, found identifier 'console'
@@ -195,7 +195,7 @@ error[E204]: expected ';' after variable declaration, found identifier 'console'
 - **Aligned gutter**: `|` columns adjust dynamically to the line number width
 - **Accurate pointers**: `^` points to the end of the offending token, not the next statement
 
-Implemented in [`forge/helix/src/errors/forge-errors.c`](forge/helix/src/errors/forge-errors.c).
+Implemented in [`anvil/helix/src/errors/anvil-errors.c`](anvil/helix/src/errors/anvil-errors.c).
 
 ---
 
@@ -220,7 +220,7 @@ import console              // import all functions from console
 import console { print }    // selective import
 ```
 
-At build time, `build.bat` copies the entire `module/` tree into `forge/bin/lib/`
+At build time, `build.bat` copies the entire `module/` tree into `anvil/bin/lib/`
 so the runtime can locate module files relative to the executable.
 
 ---
@@ -236,7 +236,7 @@ source (.hlx or .c)
                           └─► IR Optimizer  (constant fold, dead code, etc.)
                                 └─► Codegen (IR → x86-64 ASM text, Windows x64 ABI)
                                       └─► .asm
-                                            └─► Forge Assembler (Internal x86 Encoder & COFF Writer)
+                                            └─► Anvil Assembler (Internal x86 Encoder & COFF Writer)
                                                   └─► .obj  (COFF, Win64)
                                                         └─► ld + MinGW CRT
                                                               └─► .exe
@@ -252,83 +252,83 @@ that sits between semantic analysis and assembly emit. `-dump-ir` prints it.
 
 - Windows (x64)
 - MSYS2 / MinGW64 toolchain
-  - `gcc` — builds the Forge compiler itself
+  - `gcc` — builds the Anvil compiler itself
   - `ld` — links `.obj` → `.exe` (external dependency, NASM dependency has been completely removed)
 
 ---
 
-## Build Forge
+## Build Anvil
 
 ```bat
 build.bat
 ```
 
 What `build.bat` does:
-1. Compiles all Forge C sources with `gcc -std=c11 -O2`
-2. Writes `forge.exe`, `fg.exe`, `4g.exe` to `forge/bin/bin/`
-3. Copies `module/` → `forge/bin/lib/` (creates `lib/` if missing)
+1. Compiles all Anvil C sources with `gcc -std=c11 -O2`
+2. Writes `anv.exe`, `fg.exe`, `4g.exe` to `anvil/bin/bin/`
+3. Copies `module/` → `anvil/bin/lib/` (creates `lib/` if missing)
 
 ---
 
 ## Usage
 
-Add `forge\bin\bin` to your `PATH`, then use `forge`, `fg`, or `4g` interchangeably.
+Add `anvil\bin\bin` to your `PATH`, then use `anv`, `fg`, or `4g` interchangeably.
 
 ### Compile and run
 
 ```powershell
 # Compile + link → .exe
-forge src.hlx
+anv src.hlx
 4g src.hlx
 
 # Compile, link, then run immediately
-forge src.hlx -run
+anv src.hlx -run
 ```
 
 ### Output modes
 
 ```powershell
 # -asm: emit assembly text only
-forge src.hlx -asm
-forge src.hlx -asm -o out.asm
+anv src.hlx -asm
+anv src.hlx -asm -o out.asm
 
-# -obj: compile → .obj via Forge Assembler (stop before link)
-forge src.hlx -obj
-forge src.hlx -obj -o lib.obj
+# -obj: compile → .obj via Anvil Assembler (stop before link)
+anv src.hlx -obj
+anv src.hlx -obj -o lib.obj
 ```
 
 ### Debug / inspection
 
 ```powershell
-forge src.hlx -dump-tokens
-forge src.hlx -dump-ast
-forge src.hlx -dump-ir
+anv src.hlx -dump-tokens
+anv src.hlx -dump-ast
+anv src.hlx -dump-ir
 ```
 
 ### Cross-language linking
 
 ```powershell
 # Step 1 – compile each source to an object file
-forge samples\hello_mixed.hlx    -obj -o samples\helix.obj
-forge samples\mylib.c            -obj -o samples\clib.obj
+anv samples\hello_mixed.hlx    -obj -o samples\helix.obj
+anv samples\mylib.c            -obj -o samples\clib.obj
 
 # Step 2 – link into a single exe
-forge -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
+anv -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
 
 # Step 3 – run
 samples\mixed.exe
 ```
 
-You can also mix Forge `.obj` with objects from `gcc -c`:
+You can also mix Anvil `.obj` with objects from `gcc -c`:
 
 ```powershell
 gcc -c -O2 mylib.c -o mylib.obj
-forge src.hlx -obj -o src.obj
-forge -link src.obj mylib.obj -o program.exe
+anv src.hlx -obj -o src.obj
+anv -link src.obj mylib.obj -o program.exe
 ```
 
 **ABI compatibility:**
-- All Forge-generated code targets the Windows x64 ABI
+- All Anvil-generated code targets the Windows x64 ABI
   (first 4 integer args in `rcx/rdx/r8/r9`, 32-byte shadow space, 16-byte stack alignment).
 - `global` symbols are plain COFF public symbols (no leading underscore on x64).
 - `extern` declarations resolve directly to matching COFF exports.
@@ -341,7 +341,7 @@ forge -link src.obj mylib.obj -o program.exe
 | Flag              | Description                                          |
 |-------------------|------------------------------------------------------|
 | `-asm`            | Output `.asm` text only (debug/preview)              |
-| `-obj`            | Compile to `.obj` via Forge Assembler (stop before link) |
+| `-obj`            | Compile to `.obj` via Anvil Assembler (stop before link) |
 | `-link a.obj ...` | Link one or more `.obj` files into `.exe`            |
 | `-o <file>`       | Override output filename                             |
 | `-run`            | Build `.exe`, then execute it                        |
@@ -396,9 +396,9 @@ int main() {
 - [x] Module system (`import`, selective imports, `config.json` manifest)
 - [x] `console` built-in module (`print`, `input`, `clear`, `color`)
 - [x] `-asm` assembly preview
-- [x] `-obj` object file output via internal Forge Assembler
+- [x] `-obj` object file output via internal Anvil Assembler
 - [x] `-link` multi-object linker
-- [x] Auto-copy modules to `forge/bin/lib/` on build
+- [x] Auto-copy modules to `anvil/bin/lib/` on build
 - [x] Auto parameter type inference for Helix parameters (string vs int)
 - [ ] String literals in C frontend
 - [ ] `printf`/`scanf` builtins in C frontend
@@ -414,7 +414,7 @@ int main() {
 
 ## Copyright and License
 
-forge Copyright (c) 2026 MoonL1ghtSt4r.
+anv Copyright (c) 2026 MoonL1ghtSt4r.
 
 Licensed under the MIT License or LICENSE file.
 

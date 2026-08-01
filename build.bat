@@ -6,21 +6,19 @@ set "DRIVE=X:"
 
 subst %DRIVE% "%ORIGROOT%" >nul 2>nul
 if errorlevel 1 (
-    echo Forge error: failed to map %DRIVE% to project root.
+    echo Anvil error: failed to map %DRIVE% to project root.
     set "RC=1"
     goto fail
 )
 
 set "ROOT=%DRIVE%\"
-set "SRC=%ROOT%forge\helix\src"
+set "SRC=%ROOT%anvil\helix\src"
 set "IRSRC=%SRC%\ir"
-set "CSRC=%ROOT%forge\c\src"
-set "BIN=%ROOT%forge\bin\bin"
-set "OUT=%BIN%\forge.exe"
-set "OUT_FG=%BIN%\fg.exe"
-set "OUT_4G=%BIN%\4g.exe"
-set "WORKDIR=%DRIVE%\forge-build"
-set "WORKOUT=%WORKDIR%\forge.exe"
+set "CSRC=%ROOT%anvil\c\src"
+set "BIN=%ROOT%anvil\bin\bin"
+set "OUT=%BIN%\anv.exe"
+set "WORKDIR=%DRIVE%\anv-build"
+set "WORKOUT=%WORKDIR%\anv.exe"
 set "TMPDIR=%WORKDIR%\temp"
 set "TEMP=%TMPDIR%"
 set "TMP=%TMPDIR%"
@@ -31,19 +29,19 @@ if not exist "%TMPDIR%" mkdir "%TMPDIR%" || goto fail
 
 where gcc >nul 2>nul
 if errorlevel 1 (
-    echo Forge error: gcc not found in PATH.
+    echo Anvil error: gcc not found in PATH.
     set "RC=1"
     goto fail
 )
 
 where ar >nul 2>nul
 if errorlevel 1 (
-    echo Forge error: ar not found in PATH.
+    echo Anvil error: ar not found in PATH.
     set "RC=1"
     goto fail
 )
 
-echo Building Forge...
+echo Building Anvil...
 gcc -std=c11 -O2 -Wall -Wextra ^
     -I"%SRC%" ^
     -I"%SRC%\ast" ^
@@ -53,17 +51,17 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     -I"%SRC%\ir" ^
     -I"%SRC%\codegen" ^
     -I"%SRC%\errors" ^
-    -I"%ROOT%forge\assembler" ^
-    -I"%ROOT%forge\assembler\src\lexer" ^
-    -I"%ROOT%forge\assembler\src\parser" ^
-    -I"%ROOT%forge\assembler\src\x86-encode" ^
-    -I"%ROOT%forge\assembler\src\coff-writer" ^
-    -I"%ROOT%forge\assembler\src\forge-asm" ^
+    -I"%ROOT%anvil\assembler" ^
+    -I"%ROOT%anvil\assembler\src\lexer" ^
+    -I"%ROOT%anvil\assembler\src\parser" ^
+    -I"%ROOT%anvil\assembler\src\x86-encode" ^
+    -I"%ROOT%anvil\assembler\src\coff-writer" ^
+    -I"%ROOT%anvil\assembler\src\anv-asm" ^
     -I"%CSRC%" ^
     -I"%CSRC%\lexer" ^
     -I"%CSRC%\parser" ^
     -I"%CSRC%\frontend" ^
-    "%ROOT%forge\main.c" ^
+    "%ROOT%anvil\main.c" ^
     "%SRC%\lexer\helix-lexer.c" ^
     "%SRC%\parser\helix-parser.c" ^
     "%SRC%\ast\helix-ast.c" ^
@@ -72,12 +70,12 @@ gcc -std=c11 -O2 -Wall -Wextra ^
     "%SRC%\ir\builder\ir-builder.c" ^
     "%SRC%\ir\opt\ir-opt.c" ^
     "%SRC%\codegen\helix-codegen.c" ^
-    "%ROOT%forge\assembler\src\lexer\asm-lexer.c" ^
-    "%ROOT%forge\assembler\src\parser\asm-parser.c" ^
-    "%ROOT%forge\assembler\src\x86-encode\x86-encode.c" ^
-    "%ROOT%forge\assembler\src\coff-writer\coff-writer.c" ^
-    "%ROOT%forge\assembler\src\forge-asm\forge-asm.c" ^
-    "%SRC%\errors\forge-errors.c" ^
+    "%ROOT%anvil\assembler\src\lexer\asm-lexer.c" ^
+    "%ROOT%anvil\assembler\src\parser\asm-parser.c" ^
+    "%ROOT%anvil\assembler\src\x86-encode\x86-encode.c" ^
+    "%ROOT%anvil\assembler\src\coff-writer\coff-writer.c" ^
+    "%ROOT%anvil\assembler\src\anv-asm\anv-asm.c" ^
+    "%SRC%\errors\helix-errors.c" ^
     "%CSRC%\lexer\c-lexer.c" ^
     "%CSRC%\parser\c-parser.c" ^
     "%CSRC%\frontend\c-frontend.c" ^
@@ -89,12 +87,6 @@ if errorlevel 1 (
 )
 
 copy /y "%WORKOUT%" "%OUT%" >nul
-if errorlevel 1 goto fail
-
-copy /y "%WORKOUT%" "%OUT_FG%" >nul
-if errorlevel 1 goto fail
-
-copy /y "%WORKOUT%" "%OUT_4G%" >nul
 if errorlevel 1 goto fail
 
 echo Building standard libraries...
@@ -111,13 +103,13 @@ if errorlevel 1 (
 )
 
 set "MODDIR=%ROOT%module\helix"
-set "LIBDIR=%ROOT%forge\bin\lib"
+set "LIBDIR=%ROOT%anvil\bin\lib"
 
 if not exist "%LIBDIR%" mkdir "%LIBDIR%"
 echo Copying modules to %LIBDIR%...
 xcopy /e /i /y "%MODDIR%" "%LIBDIR%" >nul
 if errorlevel 1 (
-    echo Forge error: failed to copy modules.
+    echo Anvil error: failed to copy modules.
     set "RC=1"
     goto fail
 )
@@ -125,8 +117,6 @@ if errorlevel 1 (
 set "RC=0"
 echo Built:
 echo   %OUT%
-echo   %OUT_FG%
-echo   %OUT_4G%
 echo   %LIBDIR% (modules)
 echo.
 goto cleanup
@@ -136,7 +126,7 @@ echo Build failed.
 
 :cleanup
 if exist "%TMPDIR%" rmdir /s /q "%TMPDIR%"
-if exist "%WORKDIR%\forge.exe" del /q "%WORKDIR%\forge.exe" >nul 2>nul
+if exist "%WORKDIR%\anv.exe" del /q "%WORKDIR%\anv.exe" >nul 2>nul
 if exist "%WORKDIR%" rmdir /s /q "%WORKDIR%"
 subst %DRIVE% /d >nul 2>nul
 echo.

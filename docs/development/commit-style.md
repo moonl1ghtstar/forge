@@ -1,6 +1,6 @@
-# Forge Commit Style Guide
+# Anvil Commit Style Guide
 
-This document defines the commit message convention used in the Forge repository.
+This document defines the commit message convention used in the Anvil repository.
 
 The goal of this convention is to keep the project history readable,
 searchable, and easy to understand.
@@ -9,7 +9,7 @@ searchable, and easy to understand.
 
 ## Commit Message Format
 
-Forge follows a simplified Conventional Commits style:
+Anvil follows a simplified Conventional Commits style:
 
 ```
 <type>(<scope>): <description>
@@ -161,7 +161,7 @@ No behavior changes are allowed.
 
 The scope describes the affected component.
 
-Common Forge scopes:
+Common Anvil scopes:
 
 | Scope | Description |
 |---|---|
@@ -322,7 +322,7 @@ Large commits make debugging and reviewing difficult.
 
 ---
 
-# Forge Commit Checklist
+# Anvil Commit Checklist
 
 Before committing:
 
@@ -335,6 +335,6 @@ Before committing:
 
 ---
 
-Following this convention keeps Forge's development history clean
+Following this convention keeps Anvil's development history clean
 as the compiler grows.
 ```

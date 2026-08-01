@@ -1,6 +1,6 @@
 # Tools
 
-Helper tools live here. Core compiler stays in `forge/`.
+Helper tools live here. Core compiler stays in `anvil/`.
 
 Current tools:
 
@@ -18,4 +18,4 @@ Suggested split:
 Rule:
 
 - no compiler core code here
-- no C++ runtime dependency in `forge/`
+- no C++ runtime dependency in `anvil/`

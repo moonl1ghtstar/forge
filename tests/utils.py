@@ -5,22 +5,22 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-def locate_forge() -> str:
+def locate_anv() -> str:
     script_dir = Path(__file__).parent.resolve()
     project_root = script_dir.parent
     
     candidates = [
-        project_root / "forge" / "bin" / "bin" / "forge.exe",
-        project_root / "forge.exe",
-        project_root.parent / "forge.exe",
+        project_root / "anvil" / "bin" / "bin" / "anv.exe",
+        project_root / "anv.exe",
+        project_root.parent / "anv.exe",
     ]
     
     # CWD checks
     cwd = Path.cwd()
     candidates.extend([
-        cwd / "forge" / "bin" / "bin" / "forge.exe",
-        cwd / "forge.exe",
-        cwd.parent / "forge.exe",
+        cwd / "anvil" / "bin" / "bin" / "anv.exe",
+        cwd / "anv.exe",
+        cwd.parent / "anv.exe",
     ])
     
     for c in candidates:
@@ -31,14 +31,14 @@ def locate_forge() -> str:
             return str(abs_c)
             
     # PATH lookup
-    forge_name = "forge.exe" if sys.platform == "win32" else "forge"
-    path_lookup = shutil.which(forge_name)
+    anv_name = "anv.exe" if sys.platform == "win32" else "anvil"
+    path_lookup = shutil.which(anv_name)
     if path_lookup:
         abs_lookup = Path(path_lookup).resolve().absolute()
         if abs_lookup.exists() and abs_lookup.is_file():
             return str(abs_lookup)
         
-    print("Forge error: forge executable not found", file=sys.stderr)
+    print("Anvil error: anv executable not found", file=sys.stderr)
     sys.exit(1)
 
 def run_command(cmd, expected_code=None, cwd=None, timeout=30):
@@ -70,7 +70,7 @@ def run_command(cmd, expected_code=None, cwd=None, timeout=30):
     return stdout, stderr, code
 
 def create_temp_workspace() -> str:
-    return tempfile.mkdtemp(prefix="forge-test-")
+    return tempfile.mkdtemp(prefix="anv-test-")
 
 def cleanup_workspace(path: str):
     if not path:
@@ -79,9 +79,9 @@ def cleanup_workspace(path: str):
     real_path = os.path.realpath(abs_path)
     temp_dir = os.path.realpath(tempfile.gettempdir())
     
-    # Safety check: must reside directly under system temp dir and start with forge-test-
+    # Safety check: must reside directly under system temp dir and start with anv-test-
     rel = os.path.relpath(real_path, temp_dir)
-    if rel.startswith("..") or os.path.isabs(rel) or not os.path.basename(real_path).startswith("forge-test-"):
+    if rel.startswith("..") or os.path.isabs(rel) or not os.path.basename(real_path).startswith("anv-test-"):
         raise AssertionError(f"Safety violation: attempt to delete non-temporary workspace directory: {path} (resolved: {real_path})")
         
     if os.path.exists(real_path):

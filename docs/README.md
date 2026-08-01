@@ -1,14 +1,14 @@
-# Forge Documentation
+# Anvil Documentation
 
-Welcome to the official documentation for **Forge**, the compiler for the **Helix Programming Language**.
+Welcome to the official documentation for **Anvil**, the compiler for the **Helix Programming Language**.
 
-This documentation is intended for contributors, compiler developers, and anyone interested in understanding how Forge works internally.
+This documentation is intended for contributors, compiler developers, and anyone interested in understanding how Anvil works internally.
 
 ---
 
 ## Getting Started
 
-Everything you need to build and use Forge.
+Everything you need to build and use Anvil.
 
 * Installation
 * Building from Source
@@ -29,7 +29,7 @@ Documentation for the Helix programming language.
 
 ## Compiler
 
-Internal implementation details of Forge.
+Internal implementation details of Anvil.
 
 * Compiler Architecture
 * Lexer
@@ -43,7 +43,7 @@ Internal implementation details of Forge.
 
 ## Development
 
-Guidelines for contributing to Forge.
+Guidelines for contributing to Anvil.
 
 * Commit Style
 * Coding Style
@@ -75,10 +75,10 @@ Version history and major changes.
 
 ## Contributing
 
-If you'd like to contribute to Forge, please read the development documentation before submitting issues or pull requests.
+If you'd like to contribute to Anvil, please read the development documentation before submitting issues or pull requests.
 
 ---
 
 ## License
 
-Forge is released under the **MIT License**.
+Anvil is released under the **MIT License**.

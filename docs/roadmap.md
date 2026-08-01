@@ -1,6 +1,6 @@
-# Forge Roadmap
+# Anvil Roadmap
 
-Forge is currently under active development.
+Anvil is currently under active development.
 
 This roadmap describes planned features and long-term goals.
 
@@ -68,7 +68,7 @@ This roadmap describes planned features and long-term goals.
 
 # Philosophy
 
-Forge aims to become a lightweight,
+Anvil aims to become a lightweight,
 multi-language compiler infrastructure with:
 
 - shared compiler core

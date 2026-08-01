@@ -1,25 +1,25 @@
-# Install Forge
+# Install Anvil
 
-This guide explains how to install Forge after building it.
+This guide explains how to install Anvil after building it.
 
-Forge does not currently use a package manager. Installation means placing the compiler binaries and standard library modules in a location that can be accessed from your system.
+Anvil does not currently use a package manager. Installation means placing the compiler binaries and standard library modules in a location that can be accessed from your system.
 
 ---
 
 # Installation Methods
 
-There are two recommended ways to install Forge.
+There are two recommended ways to install Anvil.
 
 ## Method 1: Use the Local Build (Recommended for Development)
 
-If you built Forge from source, the compiler is already available here:
+If you built Anvil from source, the compiler is already available here:
 
 ```text
-forge/
-└── forge/
+anvil/
+└── anvil/
     └── bin/
         ├── bin/
-        │   ├── forge.exe
+        │   ├── anv.exe
         │   ├── fg.exe
         │   └── 4g.exe
         │
@@ -27,30 +27,30 @@ forge/
             └── modules
 ```
 
-You can run Forge directly:
+You can run Anvil directly:
 
 ```powershell
-forge\bin\bin\forge.exe program.hlx
+anvil\bin\bin\anv.exe program.hlx
 ```
 
-This method is recommended when developing Forge itself.
+This method is recommended when developing Anvil itself.
 
 ---
 
-# Add Forge to PATH
+# Add Anvil to PATH
 
-To use Forge from any directory, add the binary directory to your Windows PATH.
+To use Anvil from any directory, add the binary directory to your Windows PATH.
 
 Add:
 
 ```text
-forge\bin\bin
+anvil\bin\bin
 ```
 
 Example:
 
 ```text
-C:\Tools\forge\bin\bin
+C:\Tools\anvil\bin\bin
 ```
 
 After adding it, restart your terminal.
@@ -58,7 +58,7 @@ After adding it, restart your terminal.
 Verify:
 
 ```powershell
-forge --help
+anv --help
 ```
 
 or:
@@ -71,18 +71,18 @@ or:
 
 # Standard Library Modules
 
-Forge modules are stored separately from the compiler executable.
+Anvil modules are stored separately from the compiler executable.
 
 The default module location is:
 
 ```text
-forge/bin/lib/
+anvil/bin/lib/
 ```
 
 Example:
 
 ```text
-forge/bin/lib/
+anvil/bin/lib/
 ├── console/
 │   ├── config.json
 │   └── src/
@@ -98,20 +98,20 @@ When compiling:
 import console
 ```
 
-Forge searches this module directory automatically.
+Anvil searches this module directory automatically.
 
 ---
 
 # Manual Installation
 
-To install Forge manually:
+To install Anvil manually:
 
 ## 1. Copy binaries
 
 Copy:
 
 ```text
-forge.exe
+anv.exe
 fg.exe
 4g.exe
 ```
@@ -121,7 +121,7 @@ to an installation directory.
 Example:
 
 ```text
-C:\Forge\bin\
+C:\Anvil\bin\
 ```
 
 ---
@@ -131,22 +131,22 @@ C:\Forge\bin\
 Copy the module directory:
 
 ```text
-forge/bin/lib/
+anvil/bin/lib/
 ```
 
 to:
 
 ```text
-C:\Forge\lib\
+C:\Anvil\lib\
 ```
 
 The final layout should be:
 
 ```text
-C:\Forge\
+C:\Anvil\
 │
 ├── bin/
-│   ├── forge.exe
+│   ├── anv.exe
 │   ├── fg.exe
 │   └── 4g.exe
 │
@@ -157,9 +157,9 @@ C:\Forge\
 
 ---
 
-# Updating Forge
+# Updating Anvil
 
-To update Forge:
+To update Anvil:
 
 1. Pull the latest source code.
 
@@ -179,17 +179,17 @@ build.bat
 
 # Uninstall
 
-To remove Forge:
+To remove Anvil:
 
-1. Delete the Forge installation directory.
+1. Delete the Anvil installation directory.
 
 Example:
 
 ```text
-C:\Forge\
+C:\Anvil\
 ```
 
-2. Remove the Forge path entry from your system PATH.
+2. Remove the Anvil path entry from your system PATH.
 
 ---
 
@@ -198,4 +198,4 @@ C:\Forge\
 After installation, continue with:
 
 - **quick-start.md** — Create your first Helix program.
-- **build.md** — Learn how to build Forge from source.
+- **build.md** — Learn how to build Anvil from source.

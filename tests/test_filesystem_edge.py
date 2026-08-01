@@ -14,17 +14,17 @@ def assert_no_leaks(ws_path, stdout, stderr):
     import tempfile
     combined = stdout + "\n" + stderr
     
-    # Check for temporary PID-based forge-work directories
-    match = re.search(r'forge-work[/\\](\d+)', combined)
+    # Check for temporary PID-based anv-work directories
+    match = re.search(r'anv-work[/\\](\d+)', combined)
     if match:
         pid = match.group(1)
         sys_temp = tempfile.gettempdir()
-        temp_dir_path = os.path.join(sys_temp, "forge-work", pid)
+        temp_dir_path = os.path.join(sys_temp, "anv-work", pid)
         if os.path.exists(temp_dir_path):
             raise AssertionError(f"Leaked temporary directory found: {temp_dir_path}")
             
-    # Check for forge-build leaks in workspace or near it
-    leaks = ["forge-build.asm", "forge-build.o", "forge-build.exe"]
+    # Check for anv-build leaks in workspace or near it
+    leaks = ["anv-build.asm", "anv-build.o", "anv-build.exe"]
     search_dirs = [ws_path, os.path.dirname(ws_path)]
     for d in search_dirs:
         if not d:
@@ -34,19 +34,19 @@ def assert_no_leaks(ws_path, stdout, stderr):
             if os.path.exists(leak_path):
                 raise AssertionError(f"Leaked file found: {leak_path}")
 
-def assert_expected_failure(forge_bin, args, ws_path):
-    stdout, stderr, code = utils.run_command([forge_bin] + args, expected_code=None, timeout=15)
+def assert_expected_failure(anv_bin, args, ws_path):
+    stdout, stderr, code = utils.run_command([anv_bin] + args, expected_code=None, timeout=15)
     combined = stdout + "\n" + stderr
     
     if code == 0:
         raise AssertionError(f"Expected non-zero exit code for args {args}, got 0")
         
-    if "Forge error:" not in combined:
-        raise AssertionError(f"Expected 'Forge error:' in output. Output:\n{combined}")
+    if "Anvil error:" not in combined:
+        raise AssertionError(f"Expected 'Anvil error:' in output. Output:\n{combined}")
         
     assert_no_leaks(ws_path, stdout, stderr)
 
-def test_1_path_containing_spaces(forge_bin):
+def test_1_path_containing_spaces(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         space_dir = os.path.join(ws, "sub dir with spaces")
@@ -57,7 +57,7 @@ def test_1_path_containing_spaces(forge_bin):
             f.write('import console\nconsole.print("Hello World!");\n')
             
         exe = os.path.join(space_dir, "hello.exe")
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-o", exe, "-verbose"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-o", exe, "-verbose"], expected_code=0)
         
         utils.assert_exists(exe)
         run_out, run_err, run_code = utils.run_command([exe], expected_code=0)
@@ -67,7 +67,7 @@ def test_1_path_containing_spaces(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_2_korean_unicode_path(forge_bin):
+def test_2_korean_unicode_path(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         unicode_dir = os.path.join(ws, "한국어_테스트_경로")
@@ -78,7 +78,7 @@ def test_2_korean_unicode_path(forge_bin):
             f.write('import console\nconsole.print("Hello World!");\n')
             
         exe = os.path.join(unicode_dir, "hello.exe")
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-o", exe, "-verbose"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-o", exe, "-verbose"], expected_code=0)
         
         utils.assert_exists(exe)
         run_out, run_err, run_code = utils.run_command([exe], expected_code=0)
@@ -88,7 +88,7 @@ def test_2_korean_unicode_path(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_3_overwrite_existing_executable(forge_bin):
+def test_3_overwrite_existing_executable(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
@@ -99,7 +99,7 @@ def test_3_overwrite_existing_executable(forge_bin):
         with open(exe, "w") as f:
             f.write("DUMMY EXISTING EXECUTABLE CONTENT")
             
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-o", exe, "-verbose"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-o", exe, "-verbose"], expected_code=0)
         
         utils.assert_exists(exe)
         run_out, run_err, run_code = utils.run_command([exe], expected_code=0)
@@ -109,16 +109,16 @@ def test_3_overwrite_existing_executable(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_4_missing_source_file(forge_bin):
+def test_4_missing_source_file(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "nonexistent.hlx")
         exe = os.path.join(ws, "hello.exe")
-        assert_expected_failure(forge_bin, [src, "-o", exe, "-verbose"], ws)
+        assert_expected_failure(anv_bin, [src, "-o", exe, "-verbose"], ws)
     finally:
         utils.cleanup_workspace(ws)
 
-def test_5_empty_source_file(forge_bin):
+def test_5_empty_source_file(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "empty.hlx")
@@ -126,14 +126,14 @@ def test_5_empty_source_file(forge_bin):
             pass
             
         exe = os.path.join(ws, "empty.exe")
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-o", exe, "-verbose"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-o", exe, "-verbose"], expected_code=0)
         
         utils.assert_exists(exe)
         assert_no_leaks(ws, stdout, stderr)
     finally:
         utils.cleanup_workspace(ws)
 
-def test_6_output_path_points_to_existing_directory(forge_bin):
+def test_6_output_path_points_to_existing_directory(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
@@ -143,11 +143,11 @@ def test_6_output_path_points_to_existing_directory(forge_bin):
         existing_dir = os.path.join(ws, "existing_dir")
         os.makedirs(existing_dir, exist_ok=True)
         
-        assert_expected_failure(forge_bin, [src, "-o", existing_dir, "-verbose"], ws)
+        assert_expected_failure(anv_bin, [src, "-o", existing_dir, "-verbose"], ws)
     finally:
         utils.cleanup_workspace(ws)
 
-def test_7_output_parent_directory_does_not_exist(forge_bin):
+def test_7_output_parent_directory_does_not_exist(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
@@ -155,11 +155,11 @@ def test_7_output_parent_directory_does_not_exist(forge_bin):
             f.write('import console\nconsole.print("Hello World!");\n')
             
         nonexistent_parent_exe = os.path.join(ws, "no_such_parent", "hello.exe")
-        assert_expected_failure(forge_bin, [src, "-o", nonexistent_parent_exe, "-verbose"], ws)
+        assert_expected_failure(anv_bin, [src, "-o", nonexistent_parent_exe, "-verbose"], ws)
     finally:
         utils.cleanup_workspace(ws)
 
-def test_8_long_nested_path(forge_bin):
+def test_8_long_nested_path(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         # Target total path length around ~180-220 characters
@@ -177,7 +177,7 @@ def test_8_long_nested_path(forge_bin):
             f.write('import console\nconsole.print("Hello World!");\n')
             
         exe = os.path.join(nested_dir, "hello.exe")
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-o", exe, "-verbose"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-o", exe, "-verbose"], expected_code=0)
         
         utils.assert_exists(exe)
         run_out, run_err, run_code = utils.run_command([exe], expected_code=0)
@@ -188,7 +188,7 @@ def test_8_long_nested_path(forge_bin):
         utils.cleanup_workspace(ws)
 
 def main():
-    forge_bin = utils.locate_forge()
+    anv_bin = utils.locate_anv()
     
     tests = [
         ("Compile source from path containing spaces", test_1_path_containing_spaces),
@@ -208,7 +208,7 @@ def main():
     for name, test_func in tests:
         print(f"[ RUN ] {name}")
         try:
-            test_func(forge_bin)
+            test_func(anv_bin)
             print(f"[ PASS ] {name}")
             passed_count += 1
         except Exception as e:

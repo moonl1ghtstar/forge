@@ -12,7 +12,7 @@ import utils
 
 from utils import cleanup_test_files, assert_output
 
-def test_1_basic_compile(forge_bin):
+def test_1_basic_compile(anv_bin):
     hello_hlx = os.path.join(TEST_ROOT, "cases", "hello.hlx")
     hello_exe = os.path.join(TEST_ROOT, "cases", "hello.exe")
     math_hlx = os.path.join(TEST_ROOT, "cases", "math.hlx")
@@ -20,50 +20,50 @@ def test_1_basic_compile(forge_bin):
     
     cleanup_test_files([hello_exe, math_exe])
     
-    utils.run_command([forge_bin, hello_hlx], expected_code=0)
+    utils.run_command([anv_bin, hello_hlx], expected_code=0)
     utils.assert_exists(hello_exe)
     stdout, _, _ = utils.run_command([hello_exe], expected_code=0)
     assert_output(stdout, "Hello World!")
     
-    utils.run_command([forge_bin, math_hlx], expected_code=0)
+    utils.run_command([anv_bin, math_hlx], expected_code=0)
     utils.assert_exists(math_exe)
     stdout, _, _ = utils.run_command([math_exe], expected_code=0)
     assert_output(stdout, "120\n80\n2000")
     
     cleanup_test_files([hello_exe, math_exe])
 
-def test_2_custom_output(forge_bin):
+def test_2_custom_output(anv_bin):
     hello_hlx = os.path.join(TEST_ROOT, "cases", "hello.hlx")
     custom_exe = os.path.join(TEST_ROOT, "..", "custom_output.exe")
     
     cleanup_test_files([custom_exe])
-    utils.run_command([forge_bin, hello_hlx, "-o", custom_exe], expected_code=0)
+    utils.run_command([anv_bin, hello_hlx, "-o", custom_exe], expected_code=0)
     utils.assert_exists(custom_exe)
     stdout, _, _ = utils.run_command([custom_exe], expected_code=0)
     assert_output(stdout, "Hello World!")
     cleanup_test_files([custom_exe])
 
-def test_3_object_generation(forge_bin):
+def test_3_object_generation(anv_bin):
     hello_hlx = os.path.join(TEST_ROOT, "cases", "hello.hlx")
     hello_obj = os.path.join(TEST_ROOT, "..", "hello.obj")
     
     cleanup_test_files([hello_obj])
-    utils.run_command([forge_bin, hello_hlx, "-obj", "-o", hello_obj], expected_code=0)
+    utils.run_command([anv_bin, hello_hlx, "-obj", "-o", hello_obj], expected_code=0)
     utils.assert_exists(hello_obj)
 
-def test_4_manual_linking(forge_bin):
+def test_4_manual_linking(anv_bin):
     hello_obj = os.path.join(TEST_ROOT, "..", "hello.obj")
     linked_exe = os.path.join(TEST_ROOT, "..", "linked.exe")
     
     cleanup_test_files([linked_exe])
     utils.assert_exists(hello_obj)
-    utils.run_command([forge_bin, "-link", hello_obj, "-o", linked_exe], expected_code=0)
+    utils.run_command([anv_bin, "-link", hello_obj, "-o", linked_exe], expected_code=0)
     utils.assert_exists(linked_exe)
     stdout, _, _ = utils.run_command([linked_exe], expected_code=0)
     assert_output(stdout, "Hello World!")
     cleanup_test_files([hello_obj, linked_exe])
 
-def test_5_space_path_handling(forge_bin):
+def test_5_space_path_handling(anv_bin):
     temp_space_dir = os.path.join(TEST_ROOT, "temp space")
     cleanup_test_files([temp_space_dir])
     os.makedirs(temp_space_dir, exist_ok=True)
@@ -73,35 +73,35 @@ def test_5_space_path_handling(forge_bin):
     shutil.copy2(src_hello, dest_hello)
     dest_exe = os.path.join(temp_space_dir, "hello.exe")
     
-    utils.run_command([forge_bin, dest_hello], expected_code=0)
+    utils.run_command([anv_bin, dest_hello], expected_code=0)
     utils.assert_exists(dest_exe)
     stdout, _, _ = utils.run_command([dest_exe], expected_code=0)
     assert_output(stdout, "Hello World!")
     cleanup_test_files([temp_space_dir])
 
-def test_6_temporary_file_cleanup(forge_bin):
+def test_6_temporary_file_cleanup(anv_bin):
     hello_hlx = os.path.join(TEST_ROOT, "cases", "hello.hlx")
     temp_exe = os.path.join(TEST_ROOT, "..", "temp_cleanup_check.exe")
     
     cleanup_test_files([temp_exe])
-    _, stderr, _ = utils.run_command([forge_bin, hello_hlx, "-o", temp_exe, "-verbose"], expected_code=0)
+    _, stderr, _ = utils.run_command([anv_bin, hello_hlx, "-o", temp_exe, "-verbose"], expected_code=0)
     utils.assert_exists(temp_exe)
     cleanup_test_files([temp_exe])
     
     import re
     import tempfile
-    match = re.search(r'forge-work[/\\](\d+)', stderr)
+    match = re.search(r'anv-work[/\\](\d+)', stderr)
     if not match:
-        raise AssertionError("Could not identify temporary forge-work sub-folder PID in compiler verbose output.")
+        raise AssertionError("Could not identify temporary anv-work sub-folder PID in compiler verbose output.")
         
     pid = match.group(1)
     sys_temp = tempfile.gettempdir()
-    temp_dir_path = os.path.join(sys_temp, "forge-work", pid)
+    temp_dir_path = os.path.join(sys_temp, "anv-work", pid)
     
     if os.path.exists(temp_dir_path):
         raise AssertionError(f"Leaked temporary directory found: {temp_dir_path}")
         
-    leaks = ["forge-build.asm", "forge-build.o", "forge-build.exe"]
+    leaks = ["anv-build.asm", "anv-build.o", "anv-build.exe"]
     search_dirs = [os.path.join(TEST_ROOT, ".."), TEST_ROOT, os.path.join(TEST_ROOT, "cases")]
     for d in search_dirs:
         for leak in leaks:
@@ -110,14 +110,14 @@ def test_6_temporary_file_cleanup(forge_bin):
                 raise AssertionError(f"Leaked file found in repository: {leak_path}")
 
 def parallel_worker(args):
-    forge_bin, src, dst = args
+    anv_bin, src, dst = args
     try:
-        utils.run_command([forge_bin, src, "-o", dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-o", dst], expected_code=0)
         return True, ""
     except Exception as e:
         return False, str(e)
 
-def test_7_parallel_compilation(forge_bin):
+def test_7_parallel_compilation(anv_bin):
     hello_hlx = os.path.join(TEST_ROOT, "cases", "hello.hlx")
     tasks = []
     out_files = []
@@ -125,7 +125,7 @@ def test_7_parallel_compilation(forge_bin):
         out_exe = os.path.join(TEST_ROOT, "..", f"parallel_{i}.exe")
         out_files.append(out_exe)
         cleanup_test_files([out_exe])
-        tasks.append((forge_bin, hello_hlx, out_exe))
+        tasks.append((anv_bin, hello_hlx, out_exe))
         
     try:
         pool = multiprocessing.Pool(processes=10)
@@ -156,17 +156,17 @@ def test_7_parallel_compilation(forge_bin):
     if errors:
         raise AssertionError("; ".join(errors))
 
-def test_8_error_handling(forge_bin):
+def test_8_error_handling(anv_bin):
     nonexistent = os.path.join(TEST_ROOT, "cases", "nonexistent.hlx")
     cleanup_test_files([nonexistent])
-    stdout, stderr, code = utils.run_command([forge_bin, nonexistent], expected_code=None)
+    stdout, stderr, code = utils.run_command([anv_bin, nonexistent], expected_code=None)
     if code == 0:
         raise AssertionError("Expected compiler to fail with non-zero exit code on nonexistent file.")
-    if "Forge error:" not in stderr and "Forge error:" not in stdout:
-        raise AssertionError(f"Expected 'Forge error:' in output. Stdout: {stdout}\nStderr: {stderr}")
+    if "Anvil error:" not in stderr and "Anvil error:" not in stdout:
+        raise AssertionError(f"Expected 'Anvil error:' in output. Stdout: {stdout}\nStderr: {stderr}")
 
 def main():
-    forge_bin = utils.locate_forge()
+    anv_bin = utils.locate_anv()
     tests = [
         ("Basic compile", test_1_basic_compile),
         ("Custom output", test_2_custom_output),
@@ -185,7 +185,7 @@ def main():
     for name, test_func in tests:
         print(f"[ RUN ] {name}")
         try:
-            test_func(forge_bin)
+            test_func(anv_bin)
             print(f"[ PASS ] {name}")
             passed_count += 1
         except Exception as e:

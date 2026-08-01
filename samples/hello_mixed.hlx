@@ -2,9 +2,9 @@
 // This calls square() defined in mylib.c.
 //
 // Build steps:
-//   forge samples\hello_mixed.hlx -obj -o samples\helix.obj
-//   forge samples\mylib.c         -obj -o samples\clib.obj
-//   forge -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
+//   anv samples\hello_mixed.hlx -obj -o samples\helix.obj
+//   anv samples\mylib.c         -obj -o samples\clib.obj
+//   anv -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
 //   samples\mixed.exe
 
 import console

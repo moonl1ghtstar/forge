@@ -11,13 +11,13 @@ import utils
 
 HELLO_HLX = os.path.join(TEST_ROOT, "cases", "hello.hlx")
 
-def test_1_token_dump(forge_bin):
+def test_1_token_dump(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-dump-tokens"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-dump-tokens"], expected_code=0)
         
         if not stdout.strip() and not stderr.strip():
             raise AssertionError("Token dump output is empty")
@@ -31,13 +31,13 @@ def test_1_token_dump(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_2_ast_dump(forge_bin):
+def test_2_ast_dump(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-dump-ast"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-dump-ast"], expected_code=0)
         
         if not stdout.strip() and not stderr.strip():
             raise AssertionError("AST dump output is empty")
@@ -50,13 +50,13 @@ def test_2_ast_dump(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_3_ir_dump(forge_bin):
+def test_3_ir_dump(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         
-        stdout, stderr, code = utils.run_command([forge_bin, src, "-dump-ir"], expected_code=0)
+        stdout, stderr, code = utils.run_command([anv_bin, src, "-dump-ir"], expected_code=0)
         
         if not stdout.strip() and not stderr.strip():
             raise AssertionError("IR dump output is empty")
@@ -69,14 +69,14 @@ def test_3_ir_dump(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_4_asm_generation(forge_bin):
+def test_4_asm_generation(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         asm_dst = os.path.join(ws, "hello.asm")
         
-        utils.run_command([forge_bin, src, "-asm", "-o", asm_dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-asm", "-o", asm_dst], expected_code=0)
         utils.assert_exists(asm_dst)
         
         if os.path.getsize(asm_dst) == 0:
@@ -84,14 +84,14 @@ def test_4_asm_generation(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_5_obj_generation(forge_bin):
+def test_5_obj_generation(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         obj_dst = os.path.join(ws, "hello.obj")
         
-        utils.run_command([forge_bin, src, "-obj", "-o", obj_dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-obj", "-o", obj_dst], expected_code=0)
         utils.assert_exists(obj_dst)
         
         if os.path.getsize(obj_dst) == 0:
@@ -99,14 +99,14 @@ def test_5_obj_generation(forge_bin):
     finally:
         utils.cleanup_workspace(ws)
 
-def test_6_final_executable_pipeline(forge_bin):
+def test_6_final_executable_pipeline(anv_bin):
     ws = utils.create_temp_workspace()
     try:
         src = os.path.join(ws, "hello.hlx")
         shutil.copy2(HELLO_HLX, src)
         exe_dst = os.path.join(ws, "hello.exe")
         
-        utils.run_command([forge_bin, src, "-o", exe_dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-o", exe_dst], expected_code=0)
         utils.assert_exists(exe_dst)
         
         stdout, stderr, code = utils.run_command([exe_dst], expected_code=0)
@@ -116,7 +116,7 @@ def test_6_final_executable_pipeline(forge_bin):
         utils.cleanup_workspace(ws)
 
 def main():
-    forge_bin = utils.locate_forge()
+    anv_bin = utils.locate_anv()
     
     tests = [
         ("Token dump", test_1_token_dump),
@@ -134,7 +134,7 @@ def main():
     for name, test_func in tests:
         print(f"[ RUN ] {name}")
         try:
-            test_func(forge_bin)
+            test_func(anv_bin)
             print(f"[ PASS ] {name}")
             passed_count += 1
         except Exception as e:

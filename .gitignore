@@ -4,7 +4,7 @@
 *.asm
 *.obj
 
-forge/bin/
+anvil/bin/
 tools/cpp/build/
 docs/superpowers/
 .agents/
@@ -12,5 +12,5 @@ __pycache__/
 *.pyc
 
 # Except test .hlx source files
-!forge/helix/tests/*.hlx
-!forge/c/tests/*.hlx
+!anvil/helix/tests/*.hlx
+!anvil/c/tests/*.hlx

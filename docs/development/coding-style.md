@@ -1,9 +1,9 @@
-# Forge Coding Style Guide
+# Anvil Coding Style Guide
 
-This document defines the coding conventions used in the Forge compiler project.
+This document defines the coding conventions used in the Anvil compiler project.
 
 The purpose of this guide is to keep the codebase consistent,
-readable, and maintainable as Forge grows.
+readable, and maintainable as Anvil grows.
 
 ---
 
@@ -53,10 +53,10 @@ Large operations should be split into smaller functions.
 
 # File Organization
 
-Forge uses a modular structure:
+Anvil uses a modular structure:
 
 ```
-forge/
+anvil/
 ├── lexer/
 ├── parser/
 ├── sema/
@@ -186,8 +186,8 @@ Functions not exposed outside the module should not be exported.
 Use:
 
 ```c
-#ifndef FORGE_MODULE_NAME_H
-#define FORGE_MODULE_NAME_H
+#ifndef ANVIL_MODULE_NAME_H
+#define ANVIL_MODULE_NAME_H
 
 #endif
 ```
@@ -195,8 +195,8 @@ Use:
 Example:
 
 ```c
-#ifndef FORGE_LEXER_H
-#define FORGE_LEXER_H
+#ifndef ANVIL_LEXER_H
+#define ANVIL_LEXER_H
 
 typedef struct {
     int type;
@@ -219,7 +219,7 @@ Preferred order:
 // Platform headers
 #include <windows.h>
 
-// Forge headers
+// Anvil headers
 #include "lexer/lexer.h"
 #include "errors/errors.h"
 ```
@@ -281,7 +281,7 @@ Long expressions should be split.
 
 # Memory Management
 
-Forge is written in C and uses manual memory management.
+Anvil is written in C and uses manual memory management.
 
 Every allocation must have a matching free.
 
@@ -337,7 +337,7 @@ Check every error path.
 
 # Error Handling
 
-Forge uses return codes for errors.
+Anvil uses return codes for errors.
 
 Preferred:
 
@@ -364,7 +364,7 @@ Only the CLI layer should terminate the program.
 Use:
 
 ```
-Forge error: <description>
+Anvil error: <description>
 ```
 
 Example:
@@ -372,7 +372,7 @@ Example:
 ```c
 fprintf(
     stderr,
-    "Forge error: cannot open file '%s'\n",
+    "Anvil error: cannot open file '%s'\n",
     path
 );
 ```
@@ -449,13 +449,13 @@ parser -> AST -> IR -> Codegen
 
 # Logging
 
-Use Forge debug logging format.
+Use Anvil debug logging format.
 
 Example:
 
 ```c
 fprintf(stderr,
-    "[Forge] compiling: %s\n",
+    "[Anvil] compiling: %s\n",
     file
 );
 ```
@@ -463,10 +463,10 @@ fprintf(stderr,
 Available levels:
 
 ```
-[Forge]
-[Forge debug]
-[Forge warning]
-[Forge error]
+[Anvil]
+[Anvil debug]
+[Anvil warning]
+[Anvil error]
 ```
 
 ---
@@ -547,6 +547,6 @@ Before submitting:
 
 ---
 
-Consistent code style allows Forge to scale
+Consistent code style allows Anvil to scale
 from a personal compiler project into a maintainable systems project.
 ```

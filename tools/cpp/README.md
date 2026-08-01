@@ -18,7 +18,7 @@ cmake --build tools/cpp/build
 
 Commands:
 
-- `forge-tools token-dump <file>`
-- `forge-tools ast-dump <file>`
-- `forge-tools asm-preview <file>`
-- `forge-tools smoke-test`
+- `anvil-tools token-dump <file>`
+- `anvil-tools ast-dump <file>`
+- `anvil-tools asm-preview <file>`
+- `anvil-tools smoke-test`

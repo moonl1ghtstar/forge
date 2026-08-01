@@ -1,12 +1,12 @@
-# Forge Compiler Regression Test Suite
+# Anvil Compiler Regression Test Suite
 
-This directory contains the automated regression test suite for the Forge compiler.
+This directory contains the automated regression test suite for the Anvil compiler.
 The tests verify core compiler functions, output flags, manual linking, directory space safety, temporary file cleanups, multi-process compilation isolation, and error handling.
 
 ## Requirements
 
 1. **Python 3.x**: Used to execute the test suite script.
-2. **Forge Compiler**: The `forge.exe` executable must be built (typically at `forge/bin/bin/forge.exe` or present in parent folders / PATH).
+2. **Anvil Compiler**: The `anv.exe` executable must be built (typically at `anvil/bin/bin/anv.exe` or present in parent folders / PATH).
 3. **GCC & Linker**: Ensure standard Windows x64 ABI GCC toolchain is in your system PATH (e.g. MinGW-w64).
 
 ## How to Run
@@ -30,14 +30,14 @@ python run_tests.py
 - **Object generation**: Compiles source code to standard COFF `.obj` via `-obj`.
 - **Manual linking**: Links `.obj` files to `.exe` using `-link`.
 - **Space path**: Runs compilation with folder structures and paths containing spaces.
-- **Cleanup check**: Audits workspace and `%TEMP%` to confirm no temporary compiler files (like `forge-build.asm`) or isolated PID folders are leaked.
+- **Cleanup check**: Audits workspace and `%TEMP%` to confirm no temporary compiler files (like `anv-build.asm`) or isolated PID folders are leaked.
 - **Parallel build**: Compiles 10 binaries concurrently to guarantee PID directory isolation.
 - **Error handling**: Asserts that compiler exits with a non-zero code and logs proper errors for nonexistent files.
 
 ## Example Output
 
 ```text
-Using Forge compiler executable: C:\Users\User\Desktop\forge\forge\bin\bin\forge.exe
+Using Anvil compiler executable: C:\Users\User\Desktop\anvil\anvil\bin\bin\anv.exe
 
 [ RUN ] Basic compile
 [ PASS ] Basic compile

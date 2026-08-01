@@ -1,6 +1,6 @@
-# Forge IR
+# Anvil IR
 
-Forge now lowers both Helix and C ASTs into a shared IR before codegen.
+Anvil now lowers both Helix and C ASTs into a shared IR before codegen.
 
 Pipeline:
 
@@ -38,4 +38,4 @@ Current passes:
 
 Debug dump:
 
-`forge hello.hlx -dump-ir`
+`anv hello.hlx -dump-ir`

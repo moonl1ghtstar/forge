@@ -1,6 +1,6 @@
 # Quick Start
 
-This guide shows how to create and run your first Helix program with Forge.
+This guide shows how to create and run your first Helix program with Anvil.
 
 By the end of this guide, you will:
 
@@ -38,7 +38,7 @@ Open a terminal in the project directory.
 Compile the program:
 
 ```powershell
-forge main.hlx
+anv main.hlx
 ```
 
 or:
@@ -47,7 +47,7 @@ or:
 4g main.hlx
 ```
 
-Forge will process the source file through the compiler pipeline:
+Anvil will process the source file through the compiler pipeline:
 
 ```text
 main.hlx
@@ -98,7 +98,7 @@ Hello from Helix!
 You can use `-run` to compile and execute immediately:
 
 ```powershell
-forge main.hlx -run
+anv main.hlx -run
 ```
 
 Output:
@@ -116,7 +116,7 @@ Helix supports multiple variable declarations.
 Example:
 
 ```hlx
-let message = "Hello Forge";
+let message = "Hello Anvil";
 
 console.print(message);
 ```
@@ -179,37 +179,37 @@ import console { print }
 Available modules are stored in:
 
 ```text
-forge/bin/lib/
+anvil/bin/lib/
 ```
 
 ---
 
 # 7. Debugging
 
-Forge provides several inspection options.
+Anvil provides several inspection options.
 
 ## Show tokens
 
 ```powershell
-forge main.hlx -dump-tokens
+anv main.hlx -dump-tokens
 ```
 
 ## Show AST
 
 ```powershell
-forge main.hlx -dump-ast
+anv main.hlx -dump-ast
 ```
 
 ## Show IR
 
 ```powershell
-forge main.hlx -dump-ir
+anv main.hlx -dump-ir
 ```
 
 ## Generate assembly
 
 ```powershell
-forge main.hlx -asm
+anv main.hlx -asm
 ```
 
 ---
@@ -236,7 +236,7 @@ console.print("Hello World!");
 Build:
 
 ```powershell
-forge main.hlx
+anv main.hlx
 ```
 
 Run:
@@ -253,4 +253,4 @@ Continue learning:
 
 - `../language/` — Helix language reference
 - `../modules/` — Standard module documentation
-- `../compiler/` — Forge compiler internals
+- `../compiler/` — Anvil compiler internals
