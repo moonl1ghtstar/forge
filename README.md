@@ -265,21 +265,20 @@ build.bat
 
 What `build.bat` does:
 1. Compiles all Anvil C sources with `gcc -std=c11 -O2`
-2. Writes `anv.exe`, `fg.exe`, `4g.exe` to `anvil/bin/bin/`
+2. Writes `anv.exe` to `anvil/bin/bin/`
 3. Copies `module/` → `anvil/bin/lib/` (creates `lib/` if missing)
 
 ---
 
 ## Usage
 
-Add `anvil\bin\bin` to your `PATH`, then use `anv`, `fg`, or `4g` interchangeably.
+Add `anvil\bin\bin` to your `PATH`, then use `anv` interchangeably.
 
 ### Compile and run
 
 ```powershell
 # Compile + link → .exe
 anv src.hlx
-4g src.hlx
 
 # Compile, link, then run immediately
 anv src.hlx -run
