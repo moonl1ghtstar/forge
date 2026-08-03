@@ -105,9 +105,9 @@ int coff_write_object(const char *output_path,
     if (text_idx > 0) {
         CoffSecHeader *sh = &sec_hdrs[curr_sec++];
         memcpy(sh->Name, ".text\0\0\0", 8);
-        sh->SizeOfRawData = align_up(text_sec->size, 4);
+        sh->SizeOfRawData = text_sec->size;
         sh->PointerToRawData = file_offset;
-        file_offset += sh->SizeOfRawData;
+        file_offset += align_up(text_sec->size, 4);
 
         if (text_reloc_count > 0) {
             sh->PointerToRelocations = file_offset;
@@ -120,9 +120,9 @@ int coff_write_object(const char *output_path,
     if (data_idx > 0) {
         CoffSecHeader *sh = &sec_hdrs[curr_sec++];
         memcpy(sh->Name, ".data\0\0\0", 8);
-        sh->SizeOfRawData = align_up(data_sec->size, 4);
+        sh->SizeOfRawData = data_sec->size;
         sh->PointerToRawData = file_offset;
-        file_offset += sh->SizeOfRawData;
+        file_offset += align_up(data_sec->size, 4);
         sh->Characteristics = 0xC0300040; /* CNT_INITIALIZED_DATA | MEM_READ | MEM_WRITE | ALIGN_4 */
     }
 

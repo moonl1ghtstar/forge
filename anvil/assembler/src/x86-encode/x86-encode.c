@@ -30,6 +30,7 @@
 /* ---- Helpers ---- */
 
 static int fits_imm8(long long v) { return v >= -128 && v <= 127; }
+static int fits_imm16(long long v) { return v >= -32768 && v <= 32767; }
 static int fits_imm32(long long v) { return v >= INT32_MIN && v <= INT32_MAX; }
 
 /* Emit one byte into buf[n], return 0 on overflow */
@@ -357,6 +358,97 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
         return n;
     }
 
+    /* MOV [mem], imm */
+    if (dst->kind == ASMOP_MEM && src->kind == ASMOP_IMM) {
+        int size = dst->mem.size_prefix;
+        long long val = src->imm_val;
+        if (size == 0) {
+            fprintf(stderr, "anv-asm: line %d: MOV [mem], imm requires a size prefix\n",
+                    stmt->line);
+            return -1;
+        }
+        if (size == 1) {
+            if (!fits_imm8(val)) {
+                fprintf(stderr, "anv-asm: line %d: byte immediate out of range\n",
+                        stmt->line);
+                return -1;
+            }
+            if (dst->mem.kind == MEMKIND_RIP_REL) {
+                EMIT(0xC6);
+                EMIT(0x05);
+                uint32_t rel_off = ctx->section_offset + n;
+                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
+                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            } else {
+                uint8_t rex = rex_for_mem(0, 0, &dst->mem);
+                if (rex != 0x40)
+                    EMIT(rex);
+                EMIT(0xC6);
+                if (emit_mem(buf, &n, buf_size, 0, &dst->mem) < 0)
+                    return -1;
+            }
+            EMIT((uint8_t)(val & 0xFF));
+            return n;
+        }
+        if (size == 2) {
+            if (!fits_imm16(val)) {
+                fprintf(stderr, "anv-asm: line %d: word immediate out of range\n",
+                        stmt->line);
+                return -1;
+            }
+            EMIT(0x66);
+            if (dst->mem.kind == MEMKIND_RIP_REL) {
+                EMIT(0xC7);
+                EMIT(0x05);
+                uint32_t rel_off = ctx->section_offset + n;
+                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
+                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            } else {
+                uint8_t rex = rex_for_mem(0, 0, &dst->mem);
+                if (rex != 0x40)
+                    EMIT(rex);
+                EMIT(0xC7);
+                if (emit_mem(buf, &n, buf_size, 0, &dst->mem) < 0)
+                    return -1;
+            }
+            int16_t v16 = (int16_t)val;
+            EMIT(v16 & 0xFF);
+            EMIT((v16 >> 8) & 0xFF);
+            return n;
+        }
+        if (size == 4 || size == 8) {
+            if (!fits_imm32(val)) {
+                fprintf(stderr, "anv-asm: line %d: dword/qword immediate out of range\n",
+                        stmt->line);
+                return -1;
+            }
+            uint8_t rex = rex_for_mem(size == 8, 0, &dst->mem);
+            if (dst->mem.kind == MEMKIND_RIP_REL) {
+                if (rex != 0x40)
+                    EMIT(rex);
+                EMIT(0xC7);
+                EMIT(0x05);
+                uint32_t rel_off = ctx->section_offset + n;
+                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
+                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            } else {
+                if (rex != 0x40)
+                    EMIT(rex);
+                EMIT(0xC7);
+                if (emit_mem(buf, &n, buf_size, 0, &dst->mem) < 0)
+                    return -1;
+            }
+            int32_t v32 = (int32_t)val;
+            EMIT(v32 & 0xFF);
+            EMIT((v32 >> 8) & 0xFF);
+            EMIT((v32 >> 16) & 0xFF);
+            EMIT((v32 >> 24) & 0xFF);
+            return n;
+        }
+        fprintf(stderr, "anv-asm: line %d: unsupported MOV size prefix\n", stmt->line);
+        return -1;
+    }
+
     fprintf(stderr, "anv-asm: line %d: unsupported MOV form\n", stmt->line);
     return -1;
 }
@@ -367,15 +459,37 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
     int n = 0;
     const AsmOperand *dst = &stmt->operands[0];
     const AsmOperand *src = &stmt->operands[1];
+
+    if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG && src->reg_size == 128) {
+        uint8_t rex = rex_for_mem(0, src->reg_idx, &dst->mem);
+        EMIT(0xF2);
+        if (rex != 0x40)
+            EMIT(rex);
+        EMIT(0x0F);
+        EMIT(0x11);
+        if (dst->mem.kind == MEMKIND_RIP_REL) {
+            EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
+            uint32_t rel_off = ctx->section_offset + n;
+            x86_add_reloc(ctx, rel_off, dst->mem.symbol);
+            EMIT(0);
+            EMIT(0);
+            EMIT(0);
+            EMIT(0);
+        } else {
+            if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
+                return -1;
+        }
+        return n;
+    }
     if (dst->kind != ASMOP_REG || dst->reg_size != 128) {
         fprintf(stderr, "anv-asm: line %d: MOVSD requires XMM destination\n", stmt->line);
         return -1;
     }
     if (src->kind == ASMOP_MEM) {
         uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, 0);
+        EMIT(0xF2);
         if (rex != 0x40)
             EMIT(rex);
-        EMIT(0xF2);
         EMIT(0x0F);
         EMIT(0x10);
         if (src->mem.kind == MEMKIND_RIP_REL) {
@@ -389,7 +503,7 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
         }
         return n;
     }
-    fprintf(stderr, "anv-asm: line %d: MOVSD requires [mem] source\n", stmt->line);
+    fprintf(stderr, "anv-asm: line %d: MOVSD requires [mem] or XMM source\n", stmt->line);
     return -1;
 }
 
@@ -403,12 +517,149 @@ static int encode_xorpd(const AsmStatement *stmt, uint8_t *buf, int buf_size) {
         fprintf(stderr, "anv-asm: line %d: XORPD requires two XMM registers\n", stmt->line);
         return -1;
     }
+    EMIT(0x66);
     uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
     if (rex != 0x40)
         EMIT(rex);
-    EMIT(0x66);
     EMIT(0x0F);
     EMIT(0x57);
+    EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    return n;
+}
+
+static int encode_movq(X86EncodeCtx *ctx, const AsmStatement *stmt, uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+
+    if (dst->kind == ASMOP_REG && dst->reg_size == 128) {
+        if (src->kind == ASMOP_REG && src->reg_size == 64) {
+            EMIT(0x66);
+            EMIT(REX(1, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx)));
+            EMIT(0x0F);
+            EMIT(0x6E);
+            EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+            return n;
+        }
+        if (src->kind == ASMOP_MEM) {
+            EMIT(0x66);
+            EMIT(REX(1, REGHI(dst->reg_idx), 0,
+                     src->mem.kind == MEMKIND_RIP_REL ? 0 : REGHI(src->mem.base_reg)));
+            EMIT(0x0F);
+            EMIT(0x6E);
+            if (src->mem.kind == MEMKIND_RIP_REL) {
+                EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5);
+                uint32_t rel_off = ctx->section_offset + n;
+                x86_add_reloc(ctx, rel_off, src->mem.symbol);
+                EMIT(0);
+                EMIT(0);
+                EMIT(0);
+                EMIT(0);
+            } else {
+                if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
+                    return -1;
+            }
+            return n;
+        }
+    }
+
+    if (dst->kind == ASMOP_REG && dst->reg_size == 64 &&
+        src->kind == ASMOP_REG && src->reg_size == 128) {
+        EMIT(0x66);
+        EMIT(REX(1, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx)));
+        EMIT(0x0F);
+        EMIT(0x7E);
+        EMIT(MODRM_RR(src->reg_idx, dst->reg_idx));
+        return n;
+    }
+
+    if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG && src->reg_size == 128) {
+        EMIT(0x66);
+        EMIT(REX(1, REGHI(src->reg_idx), 0,
+                 dst->mem.kind == MEMKIND_RIP_REL ? 0 : REGHI(dst->mem.base_reg)));
+        EMIT(0x0F);
+        EMIT(0x7E);
+        if (dst->mem.kind == MEMKIND_RIP_REL) {
+            EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
+            uint32_t rel_off = ctx->section_offset + n;
+            x86_add_reloc(ctx, rel_off, dst->mem.symbol);
+            EMIT(0);
+            EMIT(0);
+            EMIT(0);
+            EMIT(0);
+        } else {
+            if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
+                return -1;
+        }
+        return n;
+    }
+
+    fprintf(stderr, "anv-asm: line %d: unsupported MOVQ form\n", stmt->line);
+    return -1;
+}
+
+static int encode_xmm_binop(const AsmStatement *stmt, uint8_t *buf, int buf_size,
+                            uint8_t prefix, uint8_t opcode) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG || dst->reg_size != 128) {
+        fprintf(stderr, "anv-asm: line %d: XMM destination required\n", stmt->line);
+        return -1;
+    }
+    if (src->kind != ASMOP_REG || src->reg_size != 128) {
+        fprintf(stderr, "anv-asm: line %d: XMM source required\n", stmt->line);
+        return -1;
+    }
+    EMIT(prefix);
+    uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
+    if (rex != 0x40)
+        EMIT(rex);
+    EMIT(0x0F);
+    EMIT(opcode);
+    EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    return n;
+}
+
+static int encode_cvtsi2sd(const AsmStatement *stmt, uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG || dst->reg_size != 128) {
+        fprintf(stderr, "anv-asm: line %d: CVTSI2SD requires XMM destination\n", stmt->line);
+        return -1;
+    }
+    if (src->kind != ASMOP_REG) {
+        fprintf(stderr, "anv-asm: line %d: CVTSI2SD requires register source\n", stmt->line);
+        return -1;
+    }
+    int W = (src->reg_size == 64);
+    EMIT(0xF2);
+    EMIT(REX(W, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx)));
+    EMIT(0x0F);
+    EMIT(0x2A);
+    EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+    return n;
+}
+
+static int encode_cvttsd2si(const AsmStatement *stmt, uint8_t *buf, int buf_size) {
+    int n = 0;
+    const AsmOperand *dst = &stmt->operands[0];
+    const AsmOperand *src = &stmt->operands[1];
+    if (dst->kind != ASMOP_REG || (dst->reg_size != 64 && dst->reg_size != 32)) {
+        fprintf(stderr, "anv-asm: line %d: CVTTSD2SI requires 32/64-bit destination register\n",
+                stmt->line);
+        return -1;
+    }
+    if (src->kind != ASMOP_REG || src->reg_size != 128) {
+        fprintf(stderr, "anv-asm: line %d: CVTTSD2SI requires XMM source\n", stmt->line);
+        return -1;
+    }
+    int W = (dst->reg_size == 64);
+    EMIT(0xF2);
+    EMIT(REX(W, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx)));
+    EMIT(0x0F);
+    EMIT(0x2C);
     EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
     return n;
 }
@@ -733,20 +984,44 @@ static int encode_cjmp(X86EncodeCtx *ctx, const AsmStatement *stmt,
     return n;
 }
 
-/* SETcc al */
-static int encode_setcc(const AsmStatement *stmt,
+/* SETcc reg8 or byte [mem] */
+static int encode_setcc(X86EncodeCtx *ctx, const AsmStatement *stmt,
                         uint8_t *buf, int buf_size, uint8_t cc) {
     int n = 0;
     const AsmOperand *op = &stmt->operands[0];
-    if (op->kind != ASMOP_REG || op->reg_size != 8) {
-        fprintf(stderr, "anv-asm: line %d: SETcc requires 8-bit register\n", stmt->line);
-        return -1;
+    if (op->kind == ASMOP_REG) {
+        if (op->reg_size != 8) {
+            fprintf(stderr, "anv-asm: line %d: SETcc requires 8-bit register\n", stmt->line);
+            return -1;
+        }
+        EMIT(0x0F);
+        EMIT(0x90 | cc);
+        EMIT(0xC0 | REGLO(op->reg_idx));
+        return n;
     }
-    /* For al/cl/dl/bl: no REX needed (but we emit REX if reg >= 4 to access spl/bpl) */
-    EMIT(0x0F);
-    EMIT(0x90 | cc);
-    EMIT(0xC0 | REGLO(op->reg_idx));
-    return n;
+    if (op->kind == ASMOP_MEM) {
+        if (op->mem.size_prefix && op->mem.size_prefix != 1) {
+            fprintf(stderr, "anv-asm: line %d: SETcc requires byte memory operand\n", stmt->line);
+            return -1;
+        }
+        uint8_t rex = rex_for_mem(0, 0, &op->mem);
+        if (rex != 0x40)
+            EMIT(rex);
+        EMIT(0x0F);
+        EMIT(0x90 | cc);
+        if (op->mem.kind == MEMKIND_RIP_REL) {
+            EMIT(0x05);
+            uint32_t rel_off = ctx->section_offset + n;
+            x86_add_reloc(ctx, rel_off, op->mem.symbol);
+            EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            return n;
+        }
+        if (emit_mem(buf, &n, buf_size, 0, &op->mem) < 0)
+            return -1;
+        return n;
+    }
+    fprintf(stderr, "anv-asm: line %d: SETcc requires register or byte memory operand\n", stmt->line);
+    return -1;
 }
 
 /* IMUL dst, src */
@@ -875,10 +1150,22 @@ int x86_encode(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     if (strcmp(m, "mov") == 0)
         return encode_mov(ctx, stmt, buf, buf_size);
+    if (strcmp(m, "movq") == 0)
+        return encode_movq(ctx, stmt, buf, buf_size);
     if (strcmp(m, "movsd") == 0)
         return encode_movsd(ctx, stmt, buf, buf_size);
     if (strcmp(m, "xorpd") == 0)
         return encode_xorpd(stmt, buf, buf_size);
+    if (strcmp(m, "comisd") == 0)
+        return encode_xmm_binop(stmt, buf, buf_size, 0x66, 0x2F);
+    if (strcmp(m, "subsd") == 0)
+        return encode_xmm_binop(stmt, buf, buf_size, 0xF2, 0x5C);
+    if (strcmp(m, "mulsd") == 0)
+        return encode_xmm_binop(stmt, buf, buf_size, 0xF2, 0x59);
+    if (strcmp(m, "cvtsi2sd") == 0)
+        return encode_cvtsi2sd(stmt, buf, buf_size);
+    if (strcmp(m, "cvttsd2si") == 0)
+        return encode_cvttsd2si(stmt, buf, buf_size);
     if (strcmp(m, "lea") == 0)
         return encode_lea(ctx, stmt, buf, buf_size);
 
@@ -997,27 +1284,27 @@ int x86_encode(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     /* SETcc */
     if (strcmp(m, "seto") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x00);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x00);
     if (strcmp(m, "setb") == 0 || strcmp(m, "setnae") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x02);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x02);
     if (strcmp(m, "sete") == 0 || strcmp(m, "setz") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x04);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x04);
     if (strcmp(m, "setne") == 0 || strcmp(m, "setnz") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x05);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x05);
     if (strcmp(m, "setbe") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x06);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x06);
     if (strcmp(m, "seta") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x07);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x07);
     if (strcmp(m, "sets") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x08);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x08);
     if (strcmp(m, "setl") == 0 || strcmp(m, "setnge") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x0C);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x0C);
     if (strcmp(m, "setge") == 0 || strcmp(m, "setnl") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x0D);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x0D);
     if (strcmp(m, "setle") == 0 || strcmp(m, "setng") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x0E);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x0E);
     if (strcmp(m, "setg") == 0 || strcmp(m, "setnle") == 0)
-        return encode_setcc(stmt, buf, buf_size, 0x0F);
+        return encode_setcc(ctx, stmt, buf, buf_size, 0x0F);
 
     fprintf(stderr, "anv-asm: line %d: unsupported mnemonic '%s'\n",
             stmt->line, m);

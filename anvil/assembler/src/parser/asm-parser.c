@@ -104,6 +104,26 @@ static void skip_to_newline(Parser *p) {
         advance(p);
 }
 
+static int is_size_prefix(const char *text, int *size_out) {
+    if (strcmp(text, "byte") == 0) {
+        *size_out = 1;
+        return 1;
+    }
+    if (strcmp(text, "word") == 0) {
+        *size_out = 2;
+        return 1;
+    }
+    if (strcmp(text, "dword") == 0) {
+        *size_out = 4;
+        return 1;
+    }
+    if (strcmp(text, "qword") == 0) {
+        *size_out = 8;
+        return 1;
+    }
+    return 0;
+}
+
 /* ---- Statement allocation ---- */
 
 static AsmStatement *new_stmt(AsmStmtKind kind, int line) {
@@ -134,8 +154,9 @@ static void prog_push(AsmProgram *prog, AsmStatement *s) {
  *     [base + index*scale ± disp]  e.g. [rbp+rcx*8-16]
  *     [rel symbol]            RIP-relative
  */
-static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
+static int parse_mem_operand(Parser *p, AsmOperand *op, int line, int size_prefix) {
     op->kind = ASMOP_MEM;
+    op->mem.size_prefix = size_prefix;
 
     /* [rel symbol] */
     if (check(p, ASM_TOK_IDENT) && p->cur.text &&
@@ -150,6 +171,7 @@ static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
         op->mem.disp   = 0;
         op->mem.index_reg = -1;
         op->mem.scale     = 1;
+        op->mem.size_prefix = size_prefix;
         advance(p);
         if (!match_tok(p, ASM_TOK_RBRACKET)) {
             parse_error(p, "expected ']'");
@@ -174,6 +196,7 @@ static int parse_mem_operand(Parser *p, AsmOperand *op, int line) {
     op->mem.index_reg = -1;
     op->mem.scale     = 1;
     op->mem.disp      = 0;
+    op->mem.size_prefix = size_prefix;
     op->mem.symbol    = NULL;
     advance(p);
 
@@ -265,10 +288,28 @@ static int parse_operand(Parser *p, AsmOperand *op) {
     int line = p->cur.line;
     memset(op, 0, sizeof(*op));
 
+    /* Optional NASM size prefix before a memory operand. */
+    if (check(p, ASM_TOK_IDENT)) {
+        int size_prefix = 0;
+        if (is_size_prefix(p->cur.text, &size_prefix)) {
+            advance(p);
+            if (check(p, ASM_TOK_IDENT) && p->cur.text &&
+                strcmp(p->cur.text, "ptr") == 0) {
+                advance(p);
+            }
+            if (!check(p, ASM_TOK_LBRACKET)) {
+                parse_error(p, "expected '[' after size prefix");
+                return 0;
+            }
+            advance(p);
+            return parse_mem_operand(p, op, line, size_prefix);
+        }
+    }
+
     /* Memory operand */
     if (check(p, ASM_TOK_LBRACKET)) {
         advance(p);
-        return parse_mem_operand(p, op, line);
+        return parse_mem_operand(p, op, line, 0);
     }
 
     /* Immediate: optional minus followed by number */

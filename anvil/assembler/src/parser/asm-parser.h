@@ -35,6 +35,7 @@ typedef struct {
     int        index_size; /* size of index register */
     int        scale;      /* SIB scale: 1, 2, 4, or 8 */
     long       disp;       /* displacement (may be negative) */
+    int        size_prefix; /* optional NASM size prefix: 1/2/4/8, or 0 */
     char      *symbol;     /* symbol name (MEMKIND_RIP_REL) */
 } AsmMemOp;
 

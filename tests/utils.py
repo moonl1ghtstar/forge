@@ -44,14 +44,15 @@ def locate_anv() -> str:
     print("Anvil error: anv executable not found", file=sys.stderr)
     sys.exit(1)
 
-def run_command(cmd, expected_code=None, cwd=None, timeout=30):
+def run_command(cmd, expected_code=None, cwd=None, timeout=30, env=None):
     try:
         res = subprocess.run(
             cmd, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE, 
             cwd=cwd, 
-            timeout=timeout
+            timeout=timeout,
+            env=env,
         )
         stdout = res.stdout.decode(errors='backslashreplace')
         stderr = res.stderr.decode(errors='backslashreplace')

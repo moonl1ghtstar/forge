@@ -1,4 +1,4 @@
-/*
+﻿/*
  * main.c - Command-line interface for the Anvil compiler
  *
  * Reads a Helix (.hlx) or C (.c) source file, runs the compilation pipeline
@@ -94,7 +94,7 @@ static BuildContext g_build_ctx;
 /* Maximum number of extra .obj files that can be passed via -link */
 #define MAX_LINK_OBJS 64
 
-/* Version string reported by nv --version */
+/* Version string reported by anv --version */
 #define ANV_VERSION "0.1.0"
 
 typedef struct {
@@ -172,9 +172,18 @@ static int resolve_output_kind(const char *output_path, OutputKind *kind, char *
         *kind = OUTPUT_EXE;
         return 1;
     }
-    if (strcmp(dot, ".exe") == 0) { *kind = OUTPUT_EXE; return 1; }
-    if (strcmp(dot, ".obj") == 0) { *kind = OUTPUT_OBJ; return 1; }
-    if (strcmp(dot, ".asm") == 0) { *kind = OUTPUT_ASM; return 1; }
+    if (strcmp(dot, ".exe") == 0) {
+        *kind = OUTPUT_EXE;
+        return 1;
+    }
+    if (strcmp(dot, ".obj") == 0) {
+        *kind = OUTPUT_OBJ;
+        return 1;
+    }
+    if (strcmp(dot, ".asm") == 0) {
+        *kind = OUTPUT_ASM;
+        return 1;
+    }
 
     fprintf(stderr, "Anvil error: unsupported output extension '%s'\n", dot);
     fprintf(stderr, "Supported output extensions: .exe, .obj, .asm\n");
@@ -985,8 +994,12 @@ static int assemble_and_copy(const char *asm_path, const char *output_path) {
     }
     if (g_build_ctx.verbose) {
         const char *fname = strrchr(asm_path, '\\');
-        if (!fname) fname = strrchr(asm_path, '/');
-        if (fname) fname++; else fname = asm_path;
+        if (!fname)
+            fname = strrchr(asm_path, '/');
+        if (fname)
+            fname++;
+        else
+            fname = asm_path;
         DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
     }
     if (assemble_object(asm_path, g_build_ctx.obj_path) != 0)
@@ -1018,7 +1031,8 @@ static int build_obj_output(const char *source_path, const char *output_path) {
         fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
         return 1;
     }
-    if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 1) != 0) return 1;
+    if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 1) != 0)
+        return 1;
     return assemble_and_copy(g_build_ctx.asm_path, output_path);
 }
 
@@ -1026,14 +1040,17 @@ static int build_obj_output(const char *source_path, const char *output_path) {
 static int build_exe_output(const char *source_path, const char *output_path) {
     const char *dot = strrchr(source_path, '.');
     if (dot && strcmp(dot, ".asm") == 0) {
-        if (assemble_and_copy(source_path, output_path) != 0) return 1;
+        if (assemble_and_copy(source_path, output_path) != 0)
+            return 1;
     } else {
         if (!is_absolute_path(g_build_ctx.asm_path)) {
             fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
             return 1;
         }
-        if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 0) != 0) return 1;
-        if (assemble_and_copy(g_build_ctx.asm_path, output_path) != 0) return 1;
+        if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 0) != 0)
+            return 1;
+        if (assemble_and_copy(g_build_ctx.asm_path, output_path) != 0)
+            return 1;
     }
     if (!is_absolute_path(g_build_ctx.obj_path) || !is_absolute_path(g_build_ctx.exe_path)) {
         fprintf(stderr, "Anvil error: temporary path is not absolute\n");
@@ -1041,11 +1058,19 @@ static int build_exe_output(const char *source_path, const char *output_path) {
     }
     if (g_build_ctx.verbose) {
         const char *fname = strrchr(g_build_ctx.obj_path, '\\');
-        if (!fname) fname = strrchr(g_build_ctx.obj_path, '/');
-        if (fname) fname++; else fname = g_build_ctx.obj_path;
+        if (!fname)
+            fname = strrchr(g_build_ctx.obj_path, '/');
+        if (fname)
+            fname++;
+        else
+            fname = g_build_ctx.obj_path;
         DEBUG_PRINT("[Anvil] linking:\n%s\n\n", fname);
     }
-    { const char *objs[] = {g_build_ctx.obj_path}; if (link_executable(objs, 1, g_build_ctx.exe_path) != 0) return 1; }
+    {
+        const char *objs[] = {g_build_ctx.obj_path};
+        if (link_executable(objs, 1, g_build_ctx.exe_path) != 0)
+            return 1;
+    }
     if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
         anv_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write executable output: cannot write '%s'", output_path);
         return 1;
@@ -1097,8 +1122,8 @@ int main(int argc, char *argv[]) {
     const char *source_path = NULL;
     const char *output_path = NULL;
     OutputKind output_kind = OUTPUT_EXE;
-    int do_run = 0;   /* -run : execute after build */
-    int do_link = 0;  /* -link: link pre-built .obj files */
+    int do_run = 0;  /* -run : execute after build */
+    int do_link = 0; /* -link: link pre-built .obj files */
     int dump_tokens = 0;
     int dump_ast = 0;
     int dump_ir = 0;
