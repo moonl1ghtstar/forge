@@ -407,7 +407,7 @@ int main() {
 
 ## Copyright and License
 
-anv Copyright (c) 2026 MoonL1ghtSt4r.
+anv Copyright (c) 2026 Astral Interactive
 
 Licensed under the MIT License or LICENSE file.
 
