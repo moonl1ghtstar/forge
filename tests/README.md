@@ -27,7 +27,7 @@ python run_tests.py
 
 - **Basic compile**: Compiles a source file and executes the generated binary to match output.
 - **Custom output**: Validates `-o` output naming configuration.
-- **Object generation**: Compiles source code to standard COFF `.obj` via `-obj`.
+- **Object generation**: Compiles source code to standard COFF `.obj` via `-o <name>.obj`.
 - **Manual linking**: Links `.obj` files to `.exe` using `-link`.
 - **Space path**: Runs compilation with folder structures and paths containing spaces.
 - **Cleanup check**: Audits workspace and `%TEMP%` to confirm no temporary compiler files (like `anv-build.asm`) or isolated PID folders are leaked.

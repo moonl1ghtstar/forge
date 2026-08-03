@@ -10,6 +10,7 @@ def locate_anv() -> str:
     project_root = script_dir.parent
     
     candidates = [
+        Path("X:/anvil/bin/bin/anv.exe"),
         project_root / "anvil" / "bin" / "bin" / "anv.exe",
         project_root / "anv.exe",
         project_root.parent / "anv.exe",
@@ -24,6 +25,8 @@ def locate_anv() -> str:
     ])
     
     for c in candidates:
+        if sys.platform == "win32" and str(c).startswith("X:") and c.exists() and c.is_file():
+            return str(c)
         abs_c = c.resolve().absolute()
         if abs_c.exists() and abs_c.is_file():
             if sys.platform == "win32" and abs_c.suffix.lower() != ".exe":

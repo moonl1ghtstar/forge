@@ -76,7 +76,7 @@ def test_4_asm_generation(anv_bin):
         shutil.copy2(HELLO_HLX, src)
         asm_dst = os.path.join(ws, "hello.asm")
         
-        utils.run_command([anv_bin, src, "-asm", "-o", asm_dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-o", asm_dst], expected_code=0)
         utils.assert_exists(asm_dst)
         
         if os.path.getsize(asm_dst) == 0:
@@ -91,7 +91,7 @@ def test_5_obj_generation(anv_bin):
         shutil.copy2(HELLO_HLX, src)
         obj_dst = os.path.join(ws, "hello.obj")
         
-        utils.run_command([anv_bin, src, "-obj", "-o", obj_dst], expected_code=0)
+        utils.run_command([anv_bin, src, "-o", obj_dst], expected_code=0)
         utils.assert_exists(obj_dst)
         
         if os.path.getsize(obj_dst) == 0:

@@ -18,7 +18,7 @@ typedef struct {
 
 void c_parser_init(CParser *parser, CLexer *lexer);
 /* inject_main=1: synthesise main() if absent (executable build).
- * inject_main=0: library mode — no implicit main (use for -obj on library files). */
+ * inject_main=0: library mode — no implicit main (use for -o <name>.obj on library files). */
 void c_parser_init_lib(CParser *parser, CLexer *lexer);
 ASTNode *c_parse_program(CParser *parser);
 

@@ -36,10 +36,10 @@ def test_5_link_missing_object(anv_bin):
     assert_fuzz_failure(anv_bin, ["-link", "nonexistent.obj"])
 
 def test_6_conflicting_output_flags(anv_bin):
-    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-asm", "-obj"])
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-o", "hello.asm", "-run"])
 
 def test_7_invalid_run_object_combination(anv_bin):
-    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-run", "-obj"])
+    assert_fuzz_failure(anv_bin, [HELLO_HLX, "-o", "hello.obj", "-run"])
 
 def test_8_conflicting_pipeline_flags(anv_bin):
     assert_fuzz_failure(anv_bin, [HELLO_HLX, "-dump-ir", "-run"])

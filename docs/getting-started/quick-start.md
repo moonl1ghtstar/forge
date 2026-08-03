@@ -209,7 +209,7 @@ anv main.hlx -dump-ir
 ## Generate assembly
 
 ```powershell
-anv main.hlx -asm
+anv main.hlx -o main.asm
 ```
 
 ---

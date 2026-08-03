@@ -10,15 +10,15 @@
  *   The codegen layer is frontend-agnostic: it only sees the shared AST/IR.
  *
  *   lib_mode controls whether a synthetic main() is injected for C files:
- *     lib_mode=0  → exe build (main() injected if absent)   used by default + -asm
- *     lib_mode=1  → library build (no main() injection)     used by -obj
+ *     lib_mode=0  → exe build (main() injected if absent)   used by .exe output
+ *     lib_mode=1  → library build (no main() injection)     used by .obj output
  *   Helix always acts as lib_mode=1 (caller defines main() explicitly).
  *
- * Supported output modes:
- *   -asm         Stop after .asm output (debug/preview, always kept)
- *   -obj         Compile to .obj via nasm (stop before linking)
+ * Supported output modes (chosen by the -o extension):
+ *   .asm         Stop after .asm output (debug/preview)
+ *   .obj         Compile to .obj via nasm (stop before linking);
  *                C files compiled in library mode (no synthetic main())
- *   (default)    Compile + link → .exe (full build)
+ *   .exe         Compile + link → .exe (full build, the default)
  *   -run         Build .exe, then execute it
  *
  * Cross-language linking:
@@ -70,9 +70,12 @@
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetShortPathNameA(const char *lpszLongPath, char *lpszShortPath, unsigned long cchBuffer);
+__declspec(dllimport) unsigned long __stdcall GetShortPathNameW(const wchar_t *lpszLongPath, wchar_t *lpszShortPath, unsigned long cchBuffer);
 __declspec(dllimport) unsigned long __stdcall GetCurrentDirectoryA(unsigned long nBufferLength, char *lpBuffer);
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
+__declspec(dllimport) unsigned long __stdcall GetModuleFileNameW(void *hModule, wchar_t *lpFilename, unsigned long nSize);
 __declspec(dllimport) unsigned long __stdcall GetTempPathA(unsigned long nBufferLength, char *lpBuffer);
+__declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned int CodePage, unsigned long dwFlags, const wchar_t *lpWideCharStr, int cchWideChar, char *lpMultiByteStr, int cbMultiByte, const char *lpDefaultChar, int *lpUsedDefaultChar);
 __declspec(dllimport) int __stdcall CreateDirectoryA(const char *lpPathName, void *lpSecurityAttributes);
 __declspec(dllimport) int __stdcall RemoveDirectoryA(const char *lpPathName);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -99,16 +102,23 @@ typedef struct {
     int count;
 } PathList;
 
+/* Output artifact type, derived once from the -o extension during CLI parsing */
+typedef enum {
+    OUTPUT_EXE = 0,
+    OUTPUT_OBJ,
+    OUTPUT_ASM
+} OutputKind;
+
 /* ---- Usage / error helpers ---- */
 
 static void usage(const char *progname, int exit_code) {
     fprintf(stderr, "Usage: %s <source.hlx|source.c|source.asm> [options]\n", progname);
-    fprintf(stderr, "\nOutput mode (mutually exclusive):\n");
-    fprintf(stderr, "  -asm          Output .asm only (debug/preview, default ext: .asm)\n");
-    fprintf(stderr, "  -obj          Compile to .obj via Anvil Assembler (stop before link)\n");
-    fprintf(stderr, "  (default)     Compile + link to .exe\n");
+    fprintf(stderr, "\nOutput (stage selected by the -o extension):\n");
+    fprintf(stderr, "  -o <file>     Output filename; supported extensions:\n");
+    fprintf(stderr, "                  .exe  compile + link (default when -o is omitted)\n");
+    fprintf(stderr, "                  .obj  compile + assemble, stop before linking\n");
+    fprintf(stderr, "                  .asm  compile only, emit assembly text\n");
     fprintf(stderr, "\nOther options:\n");
-    fprintf(stderr, "  -o <file>     Output filename\n");
     fprintf(stderr, "  -run          Build .exe, then execute it\n");
     fprintf(stderr, "  -link a.obj [b.obj ...]  Link one or more .obj files into .exe\n");
     fprintf(stderr, "                            Mix Anvil and C objects freely\n");
@@ -117,8 +127,8 @@ static void usage(const char *progname, int exit_code) {
     fprintf(stderr, "  -dump-ir      Print lowered IR and exit\n");
     fprintf(stderr, "  --version     Print version and exit\n");
     fprintf(stderr, "  --debug, -v   Enable debug output (developer diagnostics)\n");
-    fprintf(stderr, "\nPipeline:  source -> anv -> .asm -> anv assembler -> .obj -> ld -> .exe\n");
-    fprintf(stderr, "Cross-obj: anv src.hlx -obj && gcc -c lib.c -o lib.obj && "
+    fprintf(stderr, "\nPipeline:  source -> .asm -> .obj -> .exe (stop point set by -o extension)\n");
+    fprintf(stderr, "Cross-obj: anv src.hlx -o src.obj && gcc -c lib.c -o lib.obj && "
                     "anv -link src.obj lib.obj -o out.exe\n");
     exit(exit_code);
 }
@@ -126,6 +136,49 @@ static void usage(const char *progname, int exit_code) {
 static void cli_error(const char *progname, const char *msg) {
     fprintf(stderr, "Anvil error: %s\n", msg);
     fprintf(stderr, "Try: %s --help\n", progname);
+}
+
+static int resolve_output_kind(const char *output_path, OutputKind *kind, char **owned) {
+    const char *backslash = strrchr(output_path, '\\');
+    const char *slash = strrchr(output_path, '/');
+    const char *name;
+    const char *dot;
+    size_t len;
+
+    *owned = NULL;
+
+    if (!output_path[0]) {
+        fprintf(stderr, "Anvil error: output filename is empty\n");
+        fprintf(stderr, "Supported output extensions: .exe, .obj, .asm\n");
+        return 0;
+    }
+
+    if (slash && (!backslash || slash > backslash))
+        name = slash + 1;
+    else if (backslash)
+        name = backslash + 1;
+    else
+        name = output_path;
+
+    dot = strrchr(name, '.');
+    if (!dot || !dot[1]) {
+        len = strlen(output_path);
+        *owned = (char *)malloc(len + 5);
+        if (!*owned) {
+            fprintf(stderr, "Anvil error: out of memory\n");
+            return 0;
+        }
+        snprintf(*owned, len + 5, "%s.exe", output_path);
+        *kind = OUTPUT_EXE;
+        return 1;
+    }
+    if (strcmp(dot, ".exe") == 0) { *kind = OUTPUT_EXE; return 1; }
+    if (strcmp(dot, ".obj") == 0) { *kind = OUTPUT_OBJ; return 1; }
+    if (strcmp(dot, ".asm") == 0) { *kind = OUTPUT_ASM; return 1; }
+
+    fprintf(stderr, "Anvil error: unsupported output extension '%s'\n", dot);
+    fprintf(stderr, "Supported output extensions: .exe, .obj, .asm\n");
+    return 0;
 }
 
 /* ---- File I/O helpers ---- */
@@ -688,8 +741,8 @@ static int dump_ir_source(const char *source_path) {
  *
  * lib_mode:
  *   0 – exe build: C parser injects synthetic main() if none is found.
- *       Use for default build and -asm (preview of the full program).
- *   1 – library build: no synthetic main(). Use for -obj on C library files.
+ *       Use for .exe and .asm output.
+ *   1 – library build: no synthetic main(). Use for .obj output.
  *       Helix ignores lib_mode (main() must be declared explicitly).
  *
  * Symbol ABI (both frontends, same rules):
@@ -779,14 +832,21 @@ static void path_list_free(PathList *list) {
 }
 
 static char *module_lib_root_dup(void) {
+    wchar_t exe_w[1024];
+    wchar_t short_w[1024];
     char exe_path[1024];
-    char *last_slash;
     char *root;
+    unsigned long n;
 
-    if (GetModuleFileNameA(NULL, exe_path, sizeof(exe_path)) == 0)
+    if (GetModuleFileNameW(NULL, exe_w, sizeof(exe_w) / sizeof(exe_w[0])) == 0)
+        return NULL;
+    n = GetShortPathNameW(exe_w, short_w, sizeof(short_w) / sizeof(short_w[0]));
+    if (n == 0 || n >= sizeof(short_w) / sizeof(short_w[0]))
+        return NULL;
+    if (WideCharToMultiByte(0, 0, short_w, -1, exe_path, sizeof(exe_path), NULL, NULL) == 0)
         return NULL;
 
-    last_slash = strrchr(exe_path, '\\');
+    char *last_slash = strrchr(exe_path, '\\');
     if (!last_slash)
         last_slash = strrchr(exe_path, '/');
     if (!last_slash)
@@ -917,6 +977,82 @@ static int link_executable(const char **obj_paths, int obj_count, const char *ou
     return rc;
 }
 
+/* Assemble a .asm into the temp .obj and copy it out */
+static int assemble_and_copy(const char *asm_path, const char *output_path) {
+    if (!is_absolute_path(g_build_ctx.asm_path) || !is_absolute_path(g_build_ctx.obj_path)) {
+        fprintf(stderr, "Anvil error: temporary path is not absolute\n");
+        return 1;
+    }
+    if (g_build_ctx.verbose) {
+        const char *fname = strrchr(asm_path, '\\');
+        if (!fname) fname = strrchr(asm_path, '/');
+        if (fname) fname++; else fname = asm_path;
+        DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
+    }
+    if (assemble_object(asm_path, g_build_ctx.obj_path) != 0)
+        return 1;
+    if (copy_file_bytes(g_build_ctx.obj_path, output_path) != 0) {
+        anv_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write object output: cannot write '%s'", output_path);
+        return 1;
+    }
+    return 0;
+}
+
+/* Compile source to .asm, stopping after the .asm stage */
+static int build_asm_output(const char *source_path, const char *output_path) {
+    const char *dot = strrchr(source_path, '.');
+    if (dot && strcmp(dot, ".asm") == 0) {
+        DEBUG_PRINT("[Anvil debug] copy source='%s' destination='%s'\n", source_path ? source_path : "(null)", output_path ? output_path : "(null)");
+        return copy_file_bytes(source_path, output_path);
+    }
+    return compile_source_to_asm(source_path, output_path, 0);
+}
+
+/* Compile + assemble to .obj, stopping before linking */
+static int build_obj_output(const char *source_path, const char *output_path) {
+    const char *dot = strrchr(source_path, '.');
+    if (dot && strcmp(dot, ".asm") == 0) {
+        return assemble_and_copy(source_path, output_path);
+    }
+    if (!is_absolute_path(g_build_ctx.asm_path)) {
+        fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
+        return 1;
+    }
+    if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 1) != 0) return 1;
+    return assemble_and_copy(g_build_ctx.asm_path, output_path);
+}
+
+/* Compile + assemble + link to .exe */
+static int build_exe_output(const char *source_path, const char *output_path) {
+    const char *dot = strrchr(source_path, '.');
+    if (dot && strcmp(dot, ".asm") == 0) {
+        if (assemble_and_copy(source_path, output_path) != 0) return 1;
+    } else {
+        if (!is_absolute_path(g_build_ctx.asm_path)) {
+            fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
+            return 1;
+        }
+        if (compile_source_to_asm(source_path, g_build_ctx.asm_path, 0) != 0) return 1;
+        if (assemble_and_copy(g_build_ctx.asm_path, output_path) != 0) return 1;
+    }
+    if (!is_absolute_path(g_build_ctx.obj_path) || !is_absolute_path(g_build_ctx.exe_path)) {
+        fprintf(stderr, "Anvil error: temporary path is not absolute\n");
+        return 1;
+    }
+    if (g_build_ctx.verbose) {
+        const char *fname = strrchr(g_build_ctx.obj_path, '\\');
+        if (!fname) fname = strrchr(g_build_ctx.obj_path, '/');
+        if (fname) fname++; else fname = g_build_ctx.obj_path;
+        DEBUG_PRINT("[Anvil] linking:\n%s\n\n", fname);
+    }
+    { const char *objs[] = {g_build_ctx.obj_path}; if (link_executable(objs, 1, g_build_ctx.exe_path) != 0) return 1; }
+    if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
+        anv_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write executable output: cannot write '%s'", output_path);
+        return 1;
+    }
+    return 0;
+}
+
 static void perform_cleanup(void) {
     if (g_build_ctx.asm_path[0] != '\0') {
         safe_remove(g_build_ctx.asm_path, g_build_ctx.verbose);
@@ -960,8 +1096,7 @@ static void handle_signal(int sig) {
 int main(int argc, char *argv[]) {
     const char *source_path = NULL;
     const char *output_path = NULL;
-    int asm_only = 0; /* -asm : output .asm text only */
-    int obj_only = 0; /* -obj : output .obj (stop before link) */
+    OutputKind output_kind = OUTPUT_EXE;
     int do_run = 0;   /* -run : execute after build */
     int do_link = 0;  /* -link: link pre-built .obj files */
     int dump_tokens = 0;
@@ -1018,6 +1153,14 @@ int main(int argc, char *argv[]) {
         if (res < 0 || res >= (int)sizeof(base_work_dir)) {
             fprintf(stderr, "Anvil error: path too long\n");
             return 1;
+        }
+
+        if (!CreateDirectoryA(temp_base, NULL)) {
+            unsigned long err = GetLastError();
+            if (err != 183) { /* 183 is ERROR_ALREADY_EXISTS */
+                fprintf(stderr, "Anvil error: failed to create temporary base directory '%s' (Error %lu)\n", temp_base, err);
+                return 1;
+            }
         }
 
         if (!CreateDirectoryA(base_work_dir, NULL)) {
@@ -1093,8 +1236,8 @@ int main(int argc, char *argv[]) {
     /*
      * Modes:
      *   anv src.hlx                   → compile + link → src.exe
-     *   anv src.hlx -asm              → compile → src.asm
-     *   anv src.hlx -obj              → compile → src.obj
+     *   anv src.hlx -o out.asm        → compile → out.asm
+     *   anv src.hlx -o out.obj        → compile → out.obj
      *   anv -link a.obj b.obj -o x.exe → link only (no source compile)
      */
 
@@ -1143,6 +1286,20 @@ int main(int argc, char *argv[]) {
             output_path = default_output;
         }
 
+        {
+            char *owned = NULL;
+            if (!resolve_output_kind(output_path, &output_kind, &owned))
+                return 1;
+            if (owned) {
+                output_path = owned;
+                default_output = owned;
+            }
+        }
+        if (output_kind != OUTPUT_EXE) {
+            cli_error(argv[0], "-link only produces an executable; use -o <name>.exe");
+            return 1;
+        }
+
         if (!is_absolute_path(g_build_ctx.exe_path)) {
             fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.exe_path);
             result = 1;
@@ -1185,10 +1342,6 @@ int main(int argc, char *argv[]) {
     for (i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             output_path = argv[++i];
-        } else if (strcmp(argv[i], "-asm") == 0) {
-            asm_only = 1;
-        } else if (strcmp(argv[i], "-obj") == 0) {
-            obj_only = 1;
         } else if (strcmp(argv[i], "-run") == 0) {
             do_run = 1;
         } else if (strcmp(argv[i], "-dump-tokens") == 0) {
@@ -1209,27 +1362,19 @@ int main(int argc, char *argv[]) {
     }
 
     /* Validate flag combinations */
-    if (asm_only && obj_only) {
-        cli_error(argv[0], "-asm and -obj are mutually exclusive");
-        return 1;
-    }
-    if ((asm_only || obj_only) && do_run) {
-        cli_error(argv[0], "-run requires a full exe build (drop -asm/-obj)");
-        return 1;
-    }
     if (dump_tokens && dump_ast) {
         cli_error(argv[0], "-dump-tokens and -dump-ast are mutually exclusive");
         return 1;
     }
-    if (dump_ir && (dump_tokens || dump_ast || asm_only || obj_only || do_run)) {
+    if (dump_ir && (dump_tokens || dump_ast || do_run)) {
         cli_error(argv[0], "-dump-ir conflicts with output flags");
         return 1;
     }
-    if (dump_tokens && (asm_only || obj_only || do_run)) {
+    if (dump_tokens && do_run) {
         cli_error(argv[0], "-dump-tokens conflicts with other output flags");
         return 1;
     }
-    if (dump_ast && (asm_only || obj_only || do_run)) {
+    if (dump_ast && do_run) {
         cli_error(argv[0], "-dump-ast conflicts with other output flags");
         return 1;
     }
@@ -1250,179 +1395,41 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    /* ---- -asm mode: emit .asm text only ---- */
-    if (asm_only) {
-        if (!output_path) {
-            default_output = replace_extension(source_path, ".asm");
-            output_path = default_output;
-        }
-        const char *dot = strrchr(source_path, '.');
-        if (dot && strcmp(dot, ".asm") == 0) {
-            /* Input is already assembly; copy it */
-            DEBUG_PRINT(
-                "[Anvil debug] copy source='%s' destination='%s'\n",
-                source_path ? source_path : "(null)",
-                output_path ? output_path : "(null)");
-            result = copy_file_bytes(source_path, output_path);
-        } else {
-            result = compile_source_to_asm(source_path, output_path, 0);
-        }
-        goto cleanup;
-    }
-
-    /* ---- -obj mode: compile/assemble to .obj (stop before link) ---- */
-    if (obj_only) {
-        if (!output_path) {
-            default_output = replace_extension(source_path, ".obj");
-            output_path = default_output;
-        }
-
-        const char *dot = strrchr(source_path, '.');
-        if (dot && strcmp(dot, ".asm") == 0) {
-            if (!is_absolute_path(g_build_ctx.obj_path)) {
-                fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.obj_path);
-                result = 1;
-                goto cleanup;
-            }
-            if (verbose) {
-                const char *fname = strrchr(source_path, '\\');
-                if (!fname)
-                    fname = strrchr(source_path, '/');
-                if (fname)
-                    fname++;
-                else
-                    fname = source_path;
-                DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
-            }
-            result = assemble_object(source_path, g_build_ctx.obj_path);
-        } else {
-            if (!is_absolute_path(g_build_ctx.asm_path)) {
-                fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
-                result = 1;
-                goto cleanup;
-            }
-            result = compile_source_to_asm(source_path, g_build_ctx.asm_path, 1);
-            if (result != 0)
-                goto cleanup;
-
-            if (!is_absolute_path(g_build_ctx.asm_path) || !is_absolute_path(g_build_ctx.obj_path)) {
-                fprintf(stderr, "Anvil error: temporary path is not absolute\n");
-                result = 1;
-                goto cleanup;
-            }
-            if (verbose) {
-                const char *fname = strrchr(g_build_ctx.asm_path, '\\');
-                if (!fname)
-                    fname = strrchr(g_build_ctx.asm_path, '/');
-                if (fname)
-                    fname++;
-                else
-                    fname = g_build_ctx.asm_path;
-                DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
-            }
-            result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
-        }
-        if (result != 0)
-            goto cleanup;
-
-        DEBUG_PRINT(
-            "[Anvil debug] copy source='%s' destination='%s'\n",
-            g_build_ctx.obj_path[0] ? g_build_ctx.obj_path : "(empty)",
-            output_path ? output_path : "(null)");
-        if (copy_file_bytes(g_build_ctx.obj_path, output_path) != 0) {
-            anv_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot write '%s'", output_path);
-            result = 1;
-            goto cleanup;
-        }
-
-        goto cleanup;
-    }
-
-    /* ---- Default mode: compile + link → .exe ---- */
+    /* ---- Build: stage selected by the -o extension ---- */
     if (!output_path) {
         default_output = replace_extension(source_path, ".exe");
         output_path = default_output;
     }
 
-    const char *dot = strrchr(source_path, '.');
-    if (dot && strcmp(dot, ".asm") == 0) {
-        if (!is_absolute_path(g_build_ctx.obj_path)) {
-            fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.obj_path);
-            result = 1;
-            goto cleanup;
-        }
-        if (verbose) {
-            const char *fname = strrchr(source_path, '\\');
-            if (!fname)
-                fname = strrchr(source_path, '/');
-            if (fname)
-                fname++;
-            else
-                fname = source_path;
-            DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
-        }
-        result = assemble_object(source_path, g_build_ctx.obj_path);
-    } else {
-        if (!is_absolute_path(g_build_ctx.asm_path)) {
-            fprintf(stderr, "Anvil error: temporary path '%s' is not absolute\n", g_build_ctx.asm_path);
-            result = 1;
-            goto cleanup;
-        }
-        result = compile_source_to_asm(source_path, g_build_ctx.asm_path, 0);
-        if (result != 0)
-            goto cleanup;
-
-        if (!is_absolute_path(g_build_ctx.asm_path) || !is_absolute_path(g_build_ctx.obj_path)) {
-            fprintf(stderr, "Anvil error: temporary path is not absolute\n");
-            result = 1;
-            goto cleanup;
-        }
-        if (verbose) {
-            const char *fname = strrchr(g_build_ctx.asm_path, '\\');
-            if (!fname)
-                fname = strrchr(g_build_ctx.asm_path, '/');
-            if (fname)
-                fname++;
-            else
-                fname = g_build_ctx.asm_path;
-            DEBUG_PRINT("[Anvil] assembling:\n%s\n\n", fname);
-        }
-        result = assemble_object(g_build_ctx.asm_path, g_build_ctx.obj_path);
-    }
-    if (result != 0)
-        goto cleanup;
-
     {
-        const char *objs[] = {g_build_ctx.obj_path};
-        if (!is_absolute_path(g_build_ctx.obj_path) || !is_absolute_path(g_build_ctx.exe_path)) {
-            fprintf(stderr, "Anvil error: temporary path is not absolute\n");
-            result = 1;
-            goto cleanup;
+        char *owned = NULL;
+        if (!resolve_output_kind(output_path, &output_kind, &owned))
+            return 1;
+        if (owned) {
+            output_path = owned;
+            default_output = owned;
         }
-        if (verbose) {
-            const char *fname = strrchr(g_build_ctx.obj_path, '\\');
-            if (!fname)
-                fname = strrchr(g_build_ctx.obj_path, '/');
-            if (fname)
-                fname++;
-            else
-                fname = g_build_ctx.obj_path;
-            DEBUG_PRINT("[Anvil] linking:\n%s\n\n", fname);
-        }
-        result = link_executable(objs, 1, g_build_ctx.exe_path);
+    }
+
+    if (do_run && output_kind != OUTPUT_EXE) {
+        cli_error(argv[0], "-run requires an .exe output (use -o <name>.exe)");
+        return 1;
+    }
+
+    switch (output_kind) {
+    case OUTPUT_ASM:
+        result = build_asm_output(source_path, output_path);
+        break;
+    case OUTPUT_OBJ:
+        result = build_obj_output(source_path, output_path);
+        break;
+    case OUTPUT_EXE:
+    default:
+        result = build_exe_output(source_path, output_path);
+        break;
     }
     if (result != 0)
         goto cleanup;
-
-    DEBUG_PRINT(
-        "[Anvil debug] copy source='%s' destination='%s'\n",
-        g_build_ctx.exe_path[0] ? g_build_ctx.exe_path : "(empty)",
-        output_path ? output_path : "(null)");
-    if (copy_file_bytes(g_build_ctx.exe_path, output_path) != 0) {
-        anv_report_error(SEV_ERROR, "E902", 0, 0, NULL, NULL, "failed to write assembly output: cannot write '%s'", output_path);
-        result = 1;
-        goto cleanup;
-    }
 
     if (do_run) {
         char *run_short = short_path_dup(output_path);

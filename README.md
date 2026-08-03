@@ -288,15 +288,15 @@ anv src.hlx -run
 ### Output modes
 
 ```powershell
-# -asm: emit assembly text only
-anv src.hlx -asm
-anv src.hlx -asm -o out.asm
+# Emit assembly text only
+anv src.hlx -o out.asm
 
-# -obj: compile → .obj via Anvil Assembler (stop before link)
-anv src.hlx -obj
-anv src.hlx -obj -o lib.obj
+# Compile to object file
+anv src.hlx -o lib.obj
+
+# Compile and link to executable
+anv src.hlx -o out.exe
 ```
-
 ### Debug / inspection
 
 ```powershell
@@ -309,8 +309,8 @@ anv src.hlx -dump-ir
 
 ```powershell
 # Step 1 – compile each source to an object file
-anv samples\hello_mixed.hlx    -obj -o samples\helix.obj
-anv samples\mylib.c            -obj -o samples\clib.obj
+anv samples\hello_mixed.hlx    -o samples\helix.obj
+anv samples\mylib.c            -o samples\clib.obj
 
 # Step 2 – link into a single exe
 anv -link samples\helix.obj samples\clib.obj -o samples\mixed.exe
@@ -323,7 +323,7 @@ You can also mix Anvil `.obj` with objects from `gcc -c`:
 
 ```powershell
 gcc -c -O2 mylib.c -o mylib.obj
-anv src.hlx -obj -o src.obj
+anv src.hlx -o lib.obj -o src.obj
 anv -link src.obj mylib.obj -o program.exe
 ```
 
@@ -340,8 +340,6 @@ anv -link src.obj mylib.obj -o program.exe
 
 | Flag              | Description                                          |
 |-------------------|------------------------------------------------------|
-| `-asm`            | Output `.asm` text only (debug/preview)              |
-| `-obj`            | Compile to `.obj` via Anvil Assembler (stop before link) |
 | `-link a.obj ...` | Link one or more `.obj` files into `.exe`            |
 | `-o <file>`       | Override output filename                             |
 | `-run`            | Build `.exe`, then execute it                        |
@@ -349,9 +347,6 @@ anv -link src.obj mylib.obj -o program.exe
 | `-dump-ast`       | Print parsed AST and exit                            |
 | `-dump-ir`        | Print lowered IR and exit                            |
 | `--help`          | Show usage                                           |
-
----
-
 ## Example Programs
 
 ### Helix
@@ -395,8 +390,7 @@ int main() {
 - [x] Structured, colored error diagnostics with aligned source pointers
 - [x] Module system (`import`, selective imports, `config.json` manifest)
 - [x] `console` built-in module (`print`, `input`, `clear`, `color`)
-- [x] `-asm` assembly preview
-- [x] `-obj` object file output via internal Anvil Assembler
+- [x] Extension-based output selection via `-o`
 - [x] `-link` multi-object linker
 - [x] Auto-copy modules to `anvil/bin/lib/` on build
 - [x] Auto parameter type inference for Helix parameters (string vs int)

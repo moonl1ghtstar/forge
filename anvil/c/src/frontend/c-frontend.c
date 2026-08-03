@@ -147,7 +147,7 @@ int compile_c(const char *source_path, const char *output_path) {
 /*
  * compile_c_lib:
  *   Compile a C file to .asm in library mode (no main() injected).
- *   Used when the -obj flag targets a file that provides functions
+ *   Used when the -o <name>.obj output targets a file that provides functions
  *   but is not itself an entry point.
  */
 int compile_c_lib(const char *source_path, const char *output_path) {
