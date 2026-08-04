@@ -216,6 +216,12 @@ static uint8_t rex_for_mem(int W, int reg_op, const AsmMemOp *mem) {
     return REX(W, REGHI(reg_op), 0, 0);
 }
 
+/* 32-bit base/index registers in 64-bit code require the address-size
+ * override (67), which must be emitted BEFORE the REX prefix. */
+static int mem_addr32(const AsmMemOp *mem) {
+    return (mem->base_size == 32) || (mem->index_size == 32);
+}
+
 /* ---- Emit rel32 for a label (forward/backward/extern) ---- */
 static int emit_rel32_label(X86EncodeCtx *ctx, uint8_t *buf, int *n_ptr,
                             int buf_size, const char *label,
@@ -229,14 +235,40 @@ static int emit_rel32_label(X86EncodeCtx *ctx, uint8_t *buf, int *n_ptr,
         long after = (long)(instr_offset + 4);
         rel = (int32_t)(target - after);
     } else {
-        /* Unknown / extern: emit 0 placeholder and add relocation */
-        x86_add_reloc(ctx, instr_offset, label);
-        rel = 0;
+        /* Unknown / extern: emit addend placeholder and add relocation */
+        long addend = ctx->reloc_addend ? ctx->reloc_addend(label, ctx->ctx_data) : 0;
+        const char *sym = ctx->reloc_symbol ? ctx->reloc_symbol(label, ctx->ctx_data) : label;
+        x86_add_reloc(ctx, instr_offset, sym);
+        uint32_t a32 = (uint32_t)addend;
+        EMIT(a32 & 0xFF);
+        EMIT((a32 >> 8) & 0xFF);
+        EMIT((a32 >> 16) & 0xFF);
+        EMIT((a32 >> 24) & 0xFF);
+        *n_ptr = n;
+        return 0;
     }
     EMIT(rel & 0xFF);
     EMIT((rel >> 8) & 0xFF);
     EMIT((rel >> 16) & 0xFF);
     EMIT((rel >> 24) & 0xFF);
+    *n_ptr = n;
+    return 0;
+}
+
+/* Emit a RIP-relative memory displacement with a relocation.
+ * The addend is the label offset within its section (NASM convention:
+ * the field holds the addend and the relocation targets the section symbol). */
+static int emit_rip_reloc(X86EncodeCtx *ctx, uint8_t *buf, int *n_ptr,
+                          int buf_size, const char *label, uint32_t field_off) {
+    int n = *n_ptr;
+    long addend = ctx->reloc_addend ? ctx->reloc_addend(label, ctx->ctx_data) : 0;
+    const char *sym = ctx->reloc_symbol ? ctx->reloc_symbol(label, ctx->ctx_data) : label;
+    x86_add_reloc(ctx, field_off, sym);
+    uint32_t a32 = (uint32_t)addend;
+    EMIT(a32 & 0xFF);
+    EMIT((a32 >> 8) & 0xFF);
+    EMIT((a32 >> 16) & 0xFF);
+    EMIT((a32 >> 24) & 0xFF);
     *n_ptr = n;
     return 0;
 }
@@ -258,13 +290,22 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
     /* MOV reg, reg */
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_REG) {
+        /* NASM style: use the mr form 89 /r (mov r/m, r) so that the
+         * destination is the ModRM r/m field and the source is reg.
+         * 8-bit operands use 88 /r instead. */
+        int byte = (dst->reg_size == 8 || src->reg_size == 8);
         int W = (dst->reg_size == 64);
-        /* Use 8B /r: mov r64, r/m64 (RM form) */
-        uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
-        if (rex != 0x40 || W)
-            EMIT(rex);
-        EMIT(0x8B);
-        EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
+        uint8_t rex = REX(W, REGHI(src->reg_idx), 0, REGHI(dst->reg_idx));
+        if (byte) {
+            if (rex != 0x40)
+                EMIT(rex);
+            EMIT(0x88);
+        } else {
+            if (rex != 0x40 || W)
+                EMIT(rex);
+            EMIT(0x89);
+        }
+        EMIT(MODRM_RR(src->reg_idx, dst->reg_idx));
         return n;
     }
 
@@ -273,11 +314,23 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
         long long val = src->imm_val;
         int W = (dst->reg_size == 64);
         if (W) {
-            /* Use REX.W C7 /0 imm32 (sign-extends) for values fitting int32 */
-            if (fits_imm32(val)) {
+            /* NASM style for 64-bit destinations:
+             *  - imm fits unsigned 32: B8+rd imm32, NO REX.W (zero-extends)
+             *  - imm fits signed 32 (negative): REX.W C7 /0 imm32 (sign-extends)
+             *  - otherwise: REX.W B8+rd imm64 */
+            if (val >= 0 && (unsigned long long)val <= 0xFFFFFFFFull) {
+                if (REGHI(dst->reg_idx))
+                    EMIT(REX(0, 0, 0, 1));
+                EMIT(0xB8 | REGLO(dst->reg_idx));
+                uint32_t v32 = (uint32_t)val;
+                EMIT(v32 & 0xFF);
+                EMIT((v32 >> 8) & 0xFF);
+                EMIT((v32 >> 16) & 0xFF);
+                EMIT((v32 >> 24) & 0xFF);
+            } else if (fits_imm32(val)) {
                 EMIT(REX(1, 0, 0, REGHI(dst->reg_idx)));
                 EMIT(0xC7);
-                EMIT(0xC0 | REGLO(dst->reg_idx)); /* mod=11, /0, rm=dst */
+                EMIT(0xC0 | REGLO(dst->reg_idx));
                 int32_t v32 = (int32_t)val;
                 EMIT(v32 & 0xFF);
                 EMIT((v32 >> 8) & 0xFF);
@@ -292,6 +345,12 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
                 for (k = 0; k < 8; k++)
                     EMIT((v64 >> (k * 8)) & 0xFF);
             }
+        } else if (dst->reg_size == 8) {
+            /* 8-bit MOV: B0+rd imm8 */
+            if (REGHI(dst->reg_idx))
+                EMIT(REX(0, 0, 0, 1));
+            EMIT(0xB0 | REGLO(dst->reg_idx));
+            EMIT((uint8_t)(val & 0xFF));
         } else {
             /* 32-bit MOV: B8+rd imm32 */
             if (REGHI(dst->reg_idx))
@@ -309,23 +368,23 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
     /* MOV reg, [mem] — load */
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_MEM) {
         int W = (dst->reg_size == 64);
+        int byte = (dst->reg_size == 8);
         if (src->mem.kind == MEMKIND_RIP_REL) {
             uint8_t rex = REX(W, REGHI(dst->reg_idx), 0, 0);
             if (rex != 0x40 || W)
                 EMIT(rex);
-            EMIT(0x8B);
+            EMIT(byte ? 0x8A : 0x8B);
             EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5 /* RIP */);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, src->mem.symbol);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, src->mem.symbol, rel_off) < 0)
+                return -1;
         } else {
+            if (mem_addr32(&src->mem))
+                EMIT(0x67);
             uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
             if (rex != 0x40 || W)
                 EMIT(rex);
-            EMIT(0x8B);
+            EMIT(byte ? 0x8A : 0x8B);
             if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
                 return -1;
         }
@@ -335,23 +394,23 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
     /* MOV [mem], reg — store */
     if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG) {
         int W = (src->reg_size == 64);
+        int byte = (src->reg_size == 8);
         if (dst->mem.kind == MEMKIND_RIP_REL) {
             uint8_t rex = REX(W, REGHI(src->reg_idx), 0, 0);
             if (rex != 0x40 || W)
                 EMIT(rex);
-            EMIT(0x89);
+            EMIT(byte ? 0x88 : 0x89);
             EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                return -1;
         } else {
+            if (mem_addr32(&dst->mem))
+                EMIT(0x67);
             uint8_t rex = rex_for_mem(W, src->reg_idx, &dst->mem);
             if (rex != 0x40 || W)
                 EMIT(rex);
-            EMIT(0x89);
+            EMIT(byte ? 0x88 : 0x89);
             if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
                 return -1;
         }
@@ -377,9 +436,11 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
                 EMIT(0xC6);
                 EMIT(0x05);
                 uint32_t rel_off = ctx->section_offset + n;
-                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+                if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                    return -1;
             } else {
+                if (mem_addr32(&dst->mem))
+                    EMIT(0x67);
                 uint8_t rex = rex_for_mem(0, 0, &dst->mem);
                 if (rex != 0x40)
                     EMIT(rex);
@@ -401,9 +462,11 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
                 EMIT(0xC7);
                 EMIT(0x05);
                 uint32_t rel_off = ctx->section_offset + n;
-                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+                if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                    return -1;
             } else {
+                if (mem_addr32(&dst->mem))
+                    EMIT(0x67);
                 uint8_t rex = rex_for_mem(0, 0, &dst->mem);
                 if (rex != 0x40)
                     EMIT(rex);
@@ -429,9 +492,11 @@ static int encode_mov(X86EncodeCtx *ctx, const AsmStatement *stmt,
                 EMIT(0xC7);
                 EMIT(0x05);
                 uint32_t rel_off = ctx->section_offset + n;
-                x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-                EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+                if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                    return -1;
             } else {
+                if (mem_addr32(&dst->mem))
+                    EMIT(0x67);
                 if (rex != 0x40)
                     EMIT(rex);
                 EMIT(0xC7);
@@ -461,6 +526,8 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
     const AsmOperand *src = &stmt->operands[1];
 
     if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG && src->reg_size == 128) {
+        if (mem_addr32(&dst->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(0, src->reg_idx, &dst->mem);
         EMIT(0xF2);
         if (rex != 0x40)
@@ -470,15 +537,24 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
         if (dst->mem.kind == MEMKIND_RIP_REL) {
             EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                return -1;
         } else {
             if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
                 return -1;
         }
+        return n;
+    }
+    if (dst->kind == ASMOP_REG && dst->reg_size == 128 &&
+        src->kind == ASMOP_REG && src->reg_size == 128) {
+        /* MOVSD xmm, xmm: F2 0F 10 /r (rm form) */
+        uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, REGHI(src->reg_idx));
+        EMIT(0xF2);
+        if (rex != 0x40)
+            EMIT(rex);
+        EMIT(0x0F);
+        EMIT(0x10);
+        EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
         return n;
     }
     if (dst->kind != ASMOP_REG || dst->reg_size != 128) {
@@ -486,6 +562,8 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
         return -1;
     }
     if (src->kind == ASMOP_MEM) {
+        if (mem_addr32(&src->mem))
+            EMIT(0x67);
         uint8_t rex = REX(0, REGHI(dst->reg_idx), 0, 0);
         EMIT(0xF2);
         if (rex != 0x40)
@@ -495,8 +573,8 @@ static int encode_movsd(X86EncodeCtx *ctx, const AsmStatement *stmt,
         if (src->mem.kind == MEMKIND_RIP_REL) {
             EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, src->mem.symbol);
-            EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, src->mem.symbol, rel_off) < 0)
+                return -1;
         } else {
             if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
                 return -1;
@@ -542,6 +620,8 @@ static int encode_movq(X86EncodeCtx *ctx, const AsmStatement *stmt, uint8_t *buf
             return n;
         }
         if (src->kind == ASMOP_MEM) {
+            if (mem_addr32(&src->mem))
+                EMIT(0x67);
             EMIT(0x66);
             EMIT(REX(1, REGHI(dst->reg_idx), 0,
                      src->mem.kind == MEMKIND_RIP_REL ? 0 : REGHI(src->mem.base_reg)));
@@ -550,11 +630,8 @@ static int encode_movq(X86EncodeCtx *ctx, const AsmStatement *stmt, uint8_t *buf
             if (src->mem.kind == MEMKIND_RIP_REL) {
                 EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5);
                 uint32_t rel_off = ctx->section_offset + n;
-                x86_add_reloc(ctx, rel_off, src->mem.symbol);
-                EMIT(0);
-                EMIT(0);
-                EMIT(0);
-                EMIT(0);
+                if (emit_rip_reloc(ctx, buf, &n, buf_size, src->mem.symbol, rel_off) < 0)
+                    return -1;
             } else {
                 if (emit_mem(buf, &n, buf_size, dst->reg_idx, &src->mem) < 0)
                     return -1;
@@ -574,6 +651,8 @@ static int encode_movq(X86EncodeCtx *ctx, const AsmStatement *stmt, uint8_t *buf
     }
 
     if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG && src->reg_size == 128) {
+        if (mem_addr32(&dst->mem))
+            EMIT(0x67);
         EMIT(0x66);
         EMIT(REX(1, REGHI(src->reg_idx), 0,
                  dst->mem.kind == MEMKIND_RIP_REL ? 0 : REGHI(dst->mem.base_reg)));
@@ -582,11 +661,8 @@ static int encode_movq(X86EncodeCtx *ctx, const AsmStatement *stmt, uint8_t *buf
         if (dst->mem.kind == MEMKIND_RIP_REL) {
             EMIT((0 << 6) | (REGLO(src->reg_idx) << 3) | 5);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, dst->mem.symbol);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
-            EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, dst->mem.symbol, rel_off) < 0)
+                return -1;
         } else {
             if (emit_mem(buf, &n, buf_size, src->reg_idx, &dst->mem) < 0)
                 return -1;
@@ -681,12 +757,11 @@ static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
         EMIT(0x8D);
         EMIT((0 << 6) | (REGLO(dst->reg_idx) << 3) | 5 /* RIP */);
         uint32_t rel_off = ctx->section_offset + n;
-        x86_add_reloc(ctx, rel_off, src->mem.symbol);
-        EMIT(0);
-        EMIT(0);
-        EMIT(0);
-        EMIT(0);
+        if (emit_rip_reloc(ctx, buf, &n, buf_size, src->mem.symbol, rel_off) < 0)
+            return -1;
     } else {
+        if (mem_addr32(&src->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
         if (rex != 0x40 || W)
             EMIT(rex);
@@ -699,17 +774,47 @@ static int encode_lea(X86EncodeCtx *ctx, const AsmStatement *stmt,
 
 /* ADD / SUB / CMP / AND / OR / XOR (ALU ops) */
 static int encode_alu_regimm(uint8_t *buf, int *n_ptr, int buf_size,
-                             int W, int rm_reg, int opext, long long imm) {
+                             int W, int byte, int rm_reg, int opext, long long imm) {
     int n = *n_ptr;
-    /* opext: 0=ADD,1=OR,4=AND,5=SUB,6=XOR,7=CMP */
+    /* opext: 0=ADD,1=OR,4=AND,5=SUB,6=XOR,7=CMP.
+     * Accumulator short forms (no ModRM): ADD=04, OR=0C, AND=24, SUB=2C,
+     * XOR=34, CMP=3C (8-bit) and ADD=05, OR=0D, AND=25, SUB=2D, XOR=35,
+     * CMP=3D (16/32/64-bit) — used by NASM for reg==AL/EAX/RAX. */
+    static const uint8_t acc_byte[8] = {0x04, 0x0C, 0x00, 0x00, 0x24, 0x2C, 0x34, 0x3C};
+    static const uint8_t acc_long[8] = {0x05, 0x0D, 0x00, 0x00, 0x25, 0x2D, 0x35, 0x3D};
     uint8_t rex = REX(W, 0, 0, REGHI(rm_reg));
-    if (rex != 0x40 || W)
-        EMIT(rex);
-    if (fits_imm8(imm)) {
+    if (byte) {
+        if (rm_reg == 0) {
+            /* 8-bit accumulator: 04/0C/24/2C/34/3C ib */
+            EMIT(acc_byte[opext]);
+            EMIT((uint8_t)(imm & 0xFF));
+        } else {
+            /* 8-bit operand: 80 /opext ib */
+            if (rex != 0x40)
+                EMIT(rex);
+            EMIT(0x80);
+            EMIT(0xC0 | (opext << 3) | REGLO(rm_reg));
+            EMIT((uint8_t)(imm & 0xFF));
+        }
+    } else if (fits_imm8(imm)) {
+        if (rex != 0x40 || W)
+            EMIT(rex);
         EMIT(0x83);
         EMIT(0xC0 | (opext << 3) | REGLO(rm_reg));
         EMIT((uint8_t)(imm & 0xFF));
+    } else if (rm_reg == 0) {
+        /* accumulator: 05/0D/25/2D/35/3D id (REX.W for 64-bit) */
+        if (rex != 0x40 || W)
+            EMIT(rex);
+        EMIT(acc_long[opext]);
+        int32_t v32 = (int32_t)imm;
+        EMIT(v32 & 0xFF);
+        EMIT((v32 >> 8) & 0xFF);
+        EMIT((v32 >> 16) & 0xFF);
+        EMIT((v32 >> 24) & 0xFF);
     } else {
+        if (rex != 0x40 || W)
+            EMIT(rex);
         EMIT(0x81);
         EMIT(0xC0 | (opext << 3) | REGLO(rm_reg));
         int32_t v = (int32_t)imm;
@@ -723,14 +828,18 @@ static int encode_alu_regimm(uint8_t *buf, int *n_ptr, int buf_size,
 }
 
 static int encode_alu_regreg(uint8_t *buf, int *n_ptr, int buf_size,
-                             int W, int dst, int src, uint8_t opcode) {
+                             int W, int dst, int src, uint8_t opcode, int byte) {
     int n = *n_ptr;
-    /* opcode: ADD=03, OR=0B, AND=23, SUB=2B, XOR=33, CMP=3B */
-    uint8_t rex = REX(W, REGHI(dst), 0, REGHI(src));
+    /* NASM style: use the mr form (opcode_rr - 2) so that the first
+     * operand is the ModRM r/m field and the second is reg.
+     * opcode_rr: ADD=03, OR=0B, AND=23, SUB=2B, XOR=33, CMP=3B
+     * mr form:   ADD=01, OR=09, AND=21, SUB=29, XOR=31, CMP=39
+     * 8-bit mr forms are one less: 00, 08, 20, 28, 30, 38 */
+    uint8_t rex = REX(W, REGHI(src), 0, REGHI(dst));
     if (rex != 0x40 || W)
         EMIT(rex);
-    EMIT(opcode);
-    EMIT(MODRM_RR(dst, src));
+    EMIT((uint8_t)(opcode - 2 - (byte ? 1 : 0)));
+    EMIT(MODRM_RR(src, dst));
     *n_ptr = n;
     return 0;
 }
@@ -744,19 +853,23 @@ static int encode_alu(const AsmStatement *stmt, uint8_t *buf, int buf_size,
 
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_IMM) {
         if (encode_alu_regimm(buf, &n, buf_size, W,
+                              dst->reg_size == 8,
                               dst->reg_idx, opext_imm, src->imm_val) < 0)
             return -1;
         return n;
     }
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_REG) {
         if (encode_alu_regreg(buf, &n, buf_size, W,
-                              dst->reg_idx, src->reg_idx, opcode_rr) < 0)
+                              dst->reg_idx, src->reg_idx, opcode_rr,
+                              dst->reg_size == 8) < 0)
             return -1;
         return n;
     }
     /* dst=reg, src=[mem] */
     if (dst->kind == ASMOP_REG && src->kind == ASMOP_MEM) {
         /* rm form: opcode_rr - 8 (e.g. ADD 03->03, SUB 2B->2B, already rm form) */
+        if (mem_addr32(&src->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
         if (rex != 0x40 || W)
             EMIT(rex);
@@ -769,6 +882,8 @@ static int encode_alu(const AsmStatement *stmt, uint8_t *buf, int buf_size,
     if (dst->kind == ASMOP_MEM && src->kind == ASMOP_REG) {
         /* mr form: opcode_rr - 3 (03->01=ADD, 0B->09=OR, 23->21=AND, 2B->29=SUB, 33->31=XOR, 3B->39=CMP) */
         uint8_t mr_op = opcode_rr - 2; /* reg field is src, rm is dst */
+        if (mem_addr32(&dst->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(W, src->reg_idx, &dst->mem);
         if (rex != 0x40 || W)
             EMIT(rex);
@@ -803,6 +918,8 @@ static int encode_movzx(const AsmStatement *stmt,
         EMIT(src->reg_size == 16 ? 0xB7 : 0xB6);
         EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
     } else if (src->kind == ASMOP_MEM) {
+        if (mem_addr32(&src->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
         if (rex != 0x40 || W)
             EMIT(rex);
@@ -835,7 +952,9 @@ static int encode_movsx(const AsmStatement *stmt,
         EMIT(0x0F);
         EMIT(src->reg_size == 16 ? 0xBF : 0xBE); /* BF=16->32/64, BE=8->32/64 */
         EMIT(MODRM_RR(dst->reg_idx, src->reg_idx));
-    } else if (src->kind == ASMOP_MEM) {
+} else if (src->kind == ASMOP_MEM) {
+        if (mem_addr32(&src->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(W, dst->reg_idx, &src->mem);
         if (rex != 0x40 || W)
             EMIT(rex);
@@ -858,11 +977,12 @@ static int encode_test(const AsmStatement *stmt,
     const AsmOperand *b = &stmt->operands[1];
     int W = (a->kind == ASMOP_REG && a->reg_size == 64);
     if (a->kind == ASMOP_REG && b->kind == ASMOP_REG) {
-        /* TEST r/m, r: 85 /r */
+        /* TEST r/m, r: 85 /r (8-bit: 84 /r) */
+        int byte = (a->reg_size == 8);
         uint8_t rex = REX(W, REGHI(b->reg_idx), 0, REGHI(a->reg_idx));
         if (rex != 0x40 || W)
             EMIT(rex);
-        EMIT(0x85);
+        EMIT(byte ? 0x84 : 0x85);
         EMIT(MODRM_RR(b->reg_idx, a->reg_idx));
         return n;
     }
@@ -952,7 +1072,8 @@ static int encode_call(X86EncodeCtx *ctx, const AsmStatement *stmt,
     return -1;
 }
 
-/* JMP / conditional jumps — all use near (32-bit relative) form */
+/* JMP / conditional jumps — short (rel8) when the target fits, else near
+ * (32-bit relative), matching NASM's default relaxation. */
 static int encode_jmp(X86EncodeCtx *ctx, const AsmStatement *stmt,
                       uint8_t *buf, int buf_size, uint8_t opcode) {
     int n = 0;
@@ -960,6 +1081,13 @@ static int encode_jmp(X86EncodeCtx *ctx, const AsmStatement *stmt,
     if (op->kind != ASMOP_LABEL) {
         fprintf(stderr, "anv-asm: line %d: JMP/Jcc requires label\n", stmt->line);
         return -1;
+    }
+    long target = ctx->resolve_label ? ctx->resolve_label(op->label, ctx->ctx_data) : -1;
+    long disp = target - (long)(ctx->section_offset + 2);
+    if (target >= 0 && disp >= -128 && disp <= 127) {
+        EMIT(0xEB);
+        EMIT((uint8_t)(disp & 0xFF));
+        return n;
     }
     EMIT(opcode);
     uint32_t rel_off = ctx->section_offset + n;
@@ -975,6 +1103,13 @@ static int encode_cjmp(X86EncodeCtx *ctx, const AsmStatement *stmt,
     if (op->kind != ASMOP_LABEL) {
         fprintf(stderr, "anv-asm: line %d: Jcc requires label\n", stmt->line);
         return -1;
+    }
+    long target = ctx->resolve_label ? ctx->resolve_label(op->label, ctx->ctx_data) : -1;
+    long disp = target - (long)(ctx->section_offset + 2);
+    if (target >= 0 && disp >= -128 && disp <= 127) {
+        EMIT(0x70 | cc);
+        EMIT((uint8_t)(disp & 0xFF));
+        return n;
     }
     EMIT(0x0F);
     EMIT(0x80 | cc);
@@ -1004,6 +1139,8 @@ static int encode_setcc(X86EncodeCtx *ctx, const AsmStatement *stmt,
             fprintf(stderr, "anv-asm: line %d: SETcc requires byte memory operand\n", stmt->line);
             return -1;
         }
+        if (mem_addr32(&op->mem))
+            EMIT(0x67);
         uint8_t rex = rex_for_mem(0, 0, &op->mem);
         if (rex != 0x40)
             EMIT(rex);
@@ -1012,8 +1149,8 @@ static int encode_setcc(X86EncodeCtx *ctx, const AsmStatement *stmt,
         if (op->mem.kind == MEMKIND_RIP_REL) {
             EMIT(0x05);
             uint32_t rel_off = ctx->section_offset + n;
-            x86_add_reloc(ctx, rel_off, op->mem.symbol);
-            EMIT(0); EMIT(0); EMIT(0); EMIT(0);
+            if (emit_rip_reloc(ctx, buf, &n, buf_size, op->mem.symbol, rel_off) < 0)
+                return -1;
             return n;
         }
         if (emit_mem(buf, &n, buf_size, 0, &op->mem) < 0)

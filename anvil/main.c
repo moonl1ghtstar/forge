@@ -804,23 +804,14 @@ static int dump_ast_source(const char *source_path) {
 
 /*
  * assemble_object:
- *   Invoke nasm -f win64 to produce a COFF .obj from .asm text.
+ *   Use the built-in Anvil assembler to produce a COFF .obj from .asm text.
  *   The resulting object is Windows x64 ABI compatible and can be
  *   linked together with any other COFF .obj (Anvil or C-produced).
+ *   Output matches NASM -f win64 byte-for-byte for the instruction
+ *   set emitted by Anvil's code generators (see assembler/docs).
  */
 static int assemble_object(const char *asm_path, const char *obj_path) {
-    const char *argv[16];
-    int argc = 0;
-    argv[argc++] = "nasm";
-    argv[argc++] = "-f";
-    argv[argc++] = "win64";
-    argv[argc++] = asm_path;
-    argv[argc++] = "-o";
-    argv[argc++] = obj_path;
-    argv[argc++] = NULL;
-    // Use NASM directly (Anvil assembler has instruction encoding issues)
-    // int rc = anv_assemble_file(asm_path, obj_path);
-    int rc = run_process("nasm", argv);
+    int rc = anv_assemble_file(asm_path, obj_path);
     if (rc != 0)
         fprintf(stderr, "Anvil error: assembly failed for '%s'\n", asm_path);
     return rc;

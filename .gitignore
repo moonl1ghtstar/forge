@@ -11,6 +11,9 @@ docs/superpowers/
 __pycache__/
 *.pyc
 
+# Assembler compatibility test artifacts
+temp/compat/
+
 # Except test .hlx source files
 !anvil/helix/tests/*.hlx
 !anvil/c/tests/*.hlx

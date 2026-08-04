@@ -1,5 +1,0 @@
-import console
-
-let a = 0
-
-console.print(a);

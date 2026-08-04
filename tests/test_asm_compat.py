@@ -142,6 +142,195 @@ f:
   ret
 """,
     ),
+    (
+        "mov_reg_reg_mr",
+        """section .text
+global f
+f:
+  mov rdx, rax
+  mov ebx, ecx
+  ret
+""",
+    ),
+    (
+        "mov_byte_reg",
+        """section .text
+global f
+f:
+  mov al, bl
+  ret
+""",
+    ),
+    (
+        "xor_reg_reg",
+        """section .text
+global f
+f:
+  xor ecx, ecx
+  xor rax, rax
+  ret
+""",
+    ),
+    (
+        "mov_r64_imm_zero32",
+        """section .text
+global f
+f:
+  mov rax, 7
+  mov r8, 4
+  ret
+""",
+    ),
+    (
+        "mov_r64_imm_neg",
+        """section .text
+global f
+f:
+  mov rax, -1
+  ret
+""",
+    ),
+    (
+        "mov_r64_imm64",
+        """section .text
+global f
+f:
+  mov rax, 0x100000000
+  ret
+""",
+    ),
+    (
+        "mov_r8_imm",
+        """section .text
+global f
+f:
+  mov al, 45
+  ret
+""",
+    ),
+    (
+        "add_al_imm_acc",
+        """section .text
+global f
+f:
+  add al, 0x30
+  sub al, 0x30
+  ret
+""",
+    ),
+    (
+        "add_r64_imm_fits8",
+        """section .text
+global f
+f:
+  add rax, 1
+  cmp rax, 0x10
+  ret
+""",
+    ),
+    (
+        "add_r64_imm_acc",
+        """section .text
+global f
+f:
+  add rax, 0x1234
+  ret
+""",
+    ),
+    (
+        "add_r64_imm_nonacc",
+        """section .text
+global f
+f:
+  add rcx, 0x1234
+  ret
+""",
+    ),
+    (
+        "test_al_al",
+        """section .text
+global f
+f:
+  test al, al
+  test eax, eax
+  test rax, rax
+  ret
+""",
+    ),
+    (
+        "lea_addr32",
+        """section .text
+global f
+f:
+  lea eax, [edx+48]
+  ret
+""",
+    ),
+    (
+        "mov_mem_addr32",
+        """section .text
+global f
+f:
+  mov [edx+48], eax
+  ret
+""",
+    ),
+    (
+        "movsd_mem_addr32",
+        """section .text
+global f
+f:
+  movsd [edx+48], xmm0
+  ret
+""",
+    ),
+    (
+        "movsd_xmm_xmm",
+        """section .text
+global f
+f:
+  movsd xmm0, xmm1
+  ret
+""",
+    ),
+    (
+        "jmp_short",
+        """section .text
+global f
+f:
+  jmp over
+  nop
+  nop
+over:
+  ret
+""",
+    ),
+    (
+        "jcc_short",
+        """section .text
+global f
+f:
+  test rax, rax
+  je done
+  nop
+done:
+  ret
+""",
+    ),
+    (
+        "jmp_near",
+        "section .text\nglobal f\nf:\n  jmp faraway\n" + "  nop\n" * 150 + "faraway:\n  ret\n",
+    ),
+    (
+        "push_imm",
+        """section .text
+global f
+f:
+  push 5
+  push 0x12345678
+  ret
+""",
+    ),
 ]
 
 

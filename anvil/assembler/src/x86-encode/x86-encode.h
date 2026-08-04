@@ -39,6 +39,14 @@ typedef struct {
     /* Callback: caller provides offset of a named local label, or -1 if unknown */
     long (*resolve_label)(const char *name, void *ctx_data);
     void *ctx_data;
+
+    /* Optional callbacks for relocation target normalization.
+     * NASM emits relocations against the containing section symbol
+     * (e.g. ".data") with the label offset stored as the REL32 addend.
+     * reloc_symbol: map a label name to the relocation symbol name.
+     * reloc_addend: return the addend for a label (0 for externs). */
+    const char *(*reloc_symbol)(const char *name, void *ctx_data);
+    long (*reloc_addend)(const char *name, void *ctx_data);
 } X86EncodeCtx;
 
 /* Initialise an encode context */

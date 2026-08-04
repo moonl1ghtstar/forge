@@ -39,6 +39,20 @@ static void label_add(LabelTable *table, const char *name, uint32_t offset, int 
     table->count++;
 }
 
+/* Update an existing label's offset (used during jump relaxation,
+ * where label positions shift as jumps grow/shrink). */
+static void label_set(LabelTable *table, const char *name, uint32_t offset, int section_num) {
+    int i;
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].name, name) == 0) {
+            table->items[i].offset = offset;
+            table->items[i].section_num = section_num;
+            return;
+        }
+    }
+    label_add(table, name, offset, section_num);
+}
+
 typedef struct {
     char **items;
     int    count;
@@ -86,6 +100,124 @@ static long resolve_label_cb(const char *name, void *data) {
         }
     }
     return -1;
+}
+
+/* NASM emits relocations against the containing section symbol
+ * (".data" / ".bss") instead of the label itself. */
+static const char *reloc_symbol_cb(const char *name, void *data) {
+    LabelTable *table = (LabelTable *)data;
+    int i;
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].name, name) == 0) {
+            if (table->items[i].section_num == 2)
+                return ".data";
+            if (table->items[i].section_num == 3)
+                return ".bss";
+            break;
+        }
+    }
+    return name;
+}
+
+/* REL32 addend: label offset within its section (0 for externs). */
+static long reloc_addend_cb(const char *name, void *data) {
+    LabelTable *table = (LabelTable *)data;
+    int i;
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].name, name) == 0) {
+            if (table->items[i].section_num == 2 ||
+                table->items[i].section_num == 3)
+                return (long)table->items[i].offset;
+            break;
+        }
+    }
+    return 0;
+}
+
+/* Iteratively relax short vs near jumps, matching NASM:
+ * jmp/jcc use the rel8 form when the target fits in -128..127. */
+static void relax_jumps(AsmProgram *prog, LabelTable *label_table) {
+    int *sizes;
+    uint32_t *offs;
+    int it, i;
+
+    sizes = (int *)calloc((size_t)prog->count, sizeof(int));
+    offs = (uint32_t *)calloc((size_t)prog->count, sizeof(uint32_t));
+    if (!sizes || !offs) {
+        free(sizes);
+        free(offs);
+        return;
+    }
+
+    for (i = 0; i < prog->count; i++) {
+        if (prog->stmts[i].kind == ASM_STMT_INSTR)
+            sizes[i] = x86_measure(&prog->stmts[i]);
+    }
+
+    for (it = 0; it < 16; it++) {
+        int changed = 0;
+        uint32_t off = 0;
+        int sec = 1;
+        for (i = 0; i < prog->count; i++) {
+            AsmStatement *s = &prog->stmts[i];
+            if (s->kind == ASM_STMT_SECTION) {
+                if (strcmp(s->section_name, ".text") == 0) sec = 1;
+                else if (strcmp(s->section_name, ".data") == 0) sec = 2;
+                else if (strcmp(s->section_name, ".bss") == 0) sec = 3;
+            }
+            offs[i] = off;
+            if (s->kind == ASM_STMT_INSTR)
+                off += (uint32_t)sizes[i];
+        }
+        /* Keep label offsets in sync with the relaxed sizes, otherwise
+         * displacement computations below (and pass 2) see stale offsets.
+         * Only .text labels move; .data/.bss offsets are unaffected. */
+        sec = 1;
+        for (i = 0; i < prog->count; i++) {
+            AsmStatement *s = &prog->stmts[i];
+            if (s->kind == ASM_STMT_SECTION) {
+                if (strcmp(s->section_name, ".text") == 0) sec = 1;
+                else if (strcmp(s->section_name, ".data") == 0) sec = 2;
+                else if (strcmp(s->section_name, ".bss") == 0) sec = 3;
+                continue;
+            }
+            if (sec != 1)
+                continue;
+            if (s->kind == ASM_STMT_INSTR) {
+                if (s->label)
+                    label_set(label_table, s->label, offs[i], 1);
+            } else if (s->kind == ASM_STMT_LABEL) {
+                label_set(label_table, s->sym_name, offs[i], 1);
+            }
+        }
+        for (i = 0; i < prog->count; i++) {
+            AsmStatement *s = &prog->stmts[i];
+            if (s->kind != ASM_STMT_INSTR || s->operand_count < 1 ||
+                s->operands[0].kind != ASMOP_LABEL)
+                continue;
+            const char *m = s->mnemonic;
+            int is_jmp = (strcmp(m, "jmp") == 0);
+            int is_jcc = (m[0] == 'j') && (strcmp(m, "call") != 0) && !is_jmp;
+            if (!is_jmp && !is_jcc)
+                continue;
+            long t = resolve_label_cb(s->operands[0].label, label_table);
+            long disp = t - (long)(offs[i] + 2);
+            int want;
+            if (t >= 0 && disp >= -128 && disp <= 127)
+                want = 2;
+            else
+                want = is_jmp ? 5 : 6;
+            if (sizes[i] != want) {
+                sizes[i] = want;
+                changed = 1;
+            }
+        }
+        if (!changed)
+            break;
+    }
+
+    free(sizes);
+    free(offs);
 }
 
 static void sec_append_byte(CoffSection *sec, uint8_t b) {
@@ -179,11 +311,16 @@ int anv_assemble_text(const char *asm_text, const char *obj_path) {
         }
     }
 
+    /* Pass 1.5: Relax short vs near jumps to match NASM */
+    relax_jumps(prog, &label_table);
+
     /* Pass 2: Encode instructions and populate section data */
     CoffSection text_sec = {NULL, 0, 0};
     CoffSection data_sec = {NULL, 0, 0};
     X86EncodeCtx enc_ctx;
     x86_ctx_init(&enc_ctx, resolve_label_cb, &label_table);
+    enc_ctx.reloc_symbol = reloc_symbol_cb;
+    enc_ctx.reloc_addend = reloc_addend_cb;
 
     curr_section = 1;
     for (i = 0; i < prog->count; i++) {

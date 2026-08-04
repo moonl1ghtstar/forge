@@ -102,6 +102,63 @@ int coff_write_object(const char *output_path,
 
     uint32_t file_offset = sizeof(CoffHeader) + num_sections * sizeof(CoffSecHeader);
 
+    /* NASM only emits extern symbols that are actually referenced by a
+     * relocation, so drop unreferenced ones to match its output. */
+    int *extern_used = (int *)calloc(symbol_count > 0 ? (size_t)symbol_count : 1, sizeof(int));
+    {
+        int r;
+        for (r = 0; r < text_reloc_count; r++) {
+            int s;
+            for (s = 0; s < symbol_count; s++) {
+                if (symbols[s].section_num == 0 &&
+                    strcmp(symbols[s].name, text_relocs[r].symbol) == 0) {
+                    extern_used[s] = 1;
+                    break;
+                }
+            }
+        }
+    }
+    int kept = 0;
+    {
+        int k;
+        for (k = 0; k < symbol_count; k++) {
+            if (symbols[k].section_num != 0 || extern_used[k])
+                kept++;
+        }
+    }
+    int all_count = num_sections + kept;
+    CoffSym *all_syms = (CoffSym *)calloc(all_count > 0 ? (size_t)all_count : 1, sizeof(CoffSym));
+    int ai = 0;
+    if (text_idx > 0) {
+        all_syms[ai].name = ".text";
+        all_syms[ai].value = 0;
+        all_syms[ai].section_num = 1;
+        all_syms[ai].is_global = 0;
+        ai++;
+    }
+    if (data_idx > 0) {
+        all_syms[ai].name = ".data";
+        all_syms[ai].value = 0;
+        all_syms[ai].section_num = 2;
+        all_syms[ai].is_global = 0;
+        ai++;
+    }
+    if (bss_idx > 0) {
+        all_syms[ai].name = ".bss";
+        all_syms[ai].value = 0;
+        all_syms[ai].section_num = 3;
+        all_syms[ai].is_global = 0;
+        ai++;
+    }
+    {
+        int k;
+        for (k = 0; k < symbol_count; k++) {
+            if (symbols[k].section_num != 0 || extern_used[k])
+                all_syms[ai++] = symbols[k];
+        }
+    }
+    free(extern_used);
+
     if (text_idx > 0) {
         CoffSecHeader *sh = &sec_hdrs[curr_sec++];
         memcpy(sh->Name, ".text\0\0\0", 8);
@@ -136,7 +193,7 @@ int coff_write_object(const char *output_path,
     }
 
     hdr.PointerToSymbolTable = file_offset;
-    hdr.NumberOfSymbols = symbol_count;
+    hdr.NumberOfSymbols = all_count;
 
     /* Write headers */
     fwrite(&hdr, 1, sizeof(hdr), f);
@@ -162,8 +219,8 @@ int coff_write_object(const char *output_path,
                 /* Find symbol index */
                 int sym_idx = -1;
                 int s;
-                for (s = 0; s < symbol_count; s++) {
-                    if (strcmp(symbols[s].name, text_relocs[i].symbol) == 0) {
+                for (s = 0; s < all_count; s++) {
+                    if (strcmp(all_syms[s].name, text_relocs[i].symbol) == 0) {
                         sym_idx = s;
                         break;
                     }
@@ -201,10 +258,10 @@ int coff_write_object(const char *output_path,
     char *string_table = (char *)malloc(string_table_cap);
     memset(string_table, 0, 4); /* size field placeholder */
 
-    CoffSymEntry *sym_entries = (CoffSymEntry *)calloc(symbol_count, sizeof(CoffSymEntry));
+    CoffSymEntry *sym_entries = (CoffSymEntry *)calloc(all_count > 0 ? (size_t)all_count : 1, sizeof(CoffSymEntry));
     int i;
-    for (i = 0; i < symbol_count; i++) {
-        const CoffSym *s = &symbols[i];
+    for (i = 0; i < all_count; i++) {
+        const CoffSym *s = &all_syms[i];
         CoffSymEntry *se = &sym_entries[i];
 
         /* Symbol Name */
@@ -246,12 +303,13 @@ int coff_write_object(const char *output_path,
     memcpy(string_table, &string_table_size, 4);
 
     /* Write Symbol and String Tables */
-    fwrite(sym_entries, 1, symbol_count * sizeof(CoffSymEntry), f);
+    fwrite(sym_entries, 1, all_count * sizeof(CoffSymEntry), f);
     fwrite(string_table, 1, string_table_size, f);
 
     free(sym_entries);
     free(string_table);
     free(sec_hdrs);
+    free(all_syms);
     fclose(f);
     return 0;
 }
